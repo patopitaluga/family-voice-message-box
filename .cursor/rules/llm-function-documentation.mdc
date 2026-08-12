@@ -1,0 +1,33 @@
+---
+description: Name LLM-calling functions so askLlm/agent is obvious — for maintainers, not public JSDoc
+alwaysApply: true
+---
+
+# LLM functions: naming
+
+Functions that call OpenAI (Agents SDK, Realtime, etc.) are slow and cost money. **Signal that in the function name** so maintainers spot them in code review and call graphs — not in user-facing JSDoc.
+
+Follow normal `jsdoc-usage.mdc` for comments (importers/call sites; do not litter docs with billing or “paid API” language).
+
+## Naming
+
+- Agent entry points: **`askLlmTo…`** (e.g. `askLlmToIdentifyLessonIntent`, `askLlmToIdentifyInterests`).
+- Shared Agents SDK wrapper: **`askAgentAndLog`** in `lib/ask-agent.ts`.
+- Include **agent or orchestrator** in the name when it is not already `askLlmTo…` (e.g. `askLlmToIdentifyRelevantAgent`, not `runOrchestrator`).
+- Avoid vague verbs alone (`run`, `invoke`, `execute`, `fetch`) for LLM entry points.
+- Logging is a side effect: **`somethingAndLog`**, not `loggedSomething`.
+
+## Do not
+
+- Put “paid”, “slow”, “costs tokens”, or similar in JSDoc — keep that in this rule for agents only.
+- Scatter `OPENAI_API_KEY` checks — validate at process entry.
+
+## Examples
+
+| Function | Notes |
+|----------|--------|
+| `askAgentAndLog` | All Agents SDK agents |
+| `askLlmToIdentifyRelevantAgent` | `reception-orchestrator-agent` |
+| `askLlmToIdentifyLessonIntent` | `identify-lesson-intent-agent` |
+| `askLlmToGenerateLesson` | `generate-lesson-agent` |
+| `askLlmToIdentifyInterests` | `interests-observer-agent` |

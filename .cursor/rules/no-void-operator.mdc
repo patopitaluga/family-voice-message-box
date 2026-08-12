@@ -1,0 +1,26 @@
+---
+description: Do not use the void operator on expressions
+globs: **/*.{ts,mjs,vue}
+alwaysApply: false
+---
+
+# No `void` operator
+
+Do not prefix expressions with the `void` operator to ignore promises or return values. Call the function or chain `.catch()` directly.
+
+```typescript
+// Good
+askLlmToIdentifyInterests(userPrompt, assistantResponse, source).catch((error) => {
+  logTurnError('interests identification failed', error, { source });
+});
+
+maybeCreateResponseImpl();
+checkSchedules();
+
+// Bad
+void askLlmToIdentifyInterests(...).catch(handleError);
+void maybeCreateResponseImpl();
+void checkSchedules();
+```
+
+`void` in **type positions** is fine (`() => void`, `Promise<void>`). This rule is only for the `void` **operator** on expressions.

@@ -1,0 +1,36 @@
+---
+description: Omit braces on single-statement control flow bodies
+globs: **/*.{ts,mjs,vue}
+alwaysApply: false
+---
+
+# Brace style
+
+Never wrap a lone `throw`, `return`, or expression statement — keep it on the **same line** as the `if`.
+
+```typescript
+// Good — one line
+if (!token) return false;
+if (!process.env.OPENAI_API_KEY?.trim()) throw new Error('OPENAI_API_KEY is not set');
+if (err.code === 'EBADCSRFTOKEN') return res.status(403).json({ error: 'Invalid CSRF token' });
+
+// Bad — unnecessary braces
+if (!token) {
+  return false;
+}
+
+// Bad — single statement split onto the next line
+if (!process.env.OPENAI_API_KEY?.trim())
+  throw new Error('OPENAI_API_KEY is not set');
+```
+
+Keep braces when the body has multiple statements or spans multiple lines:
+
+```typescript
+if (!secret) {
+  secret = tokens.secretSync();
+  writeSecret(req, res, secret);
+}
+```
+
+Applies to `if`, `else`, `for`, `while`, and `do`.

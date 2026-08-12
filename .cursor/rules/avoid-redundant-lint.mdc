@@ -1,0 +1,27 @@
+---
+description: Do not run the linter after every edit — saves tokens and time
+alwaysApply: true
+---
+
+# Lint: run only when warranted
+
+**Do not run `npm run lint` (or `eslint`) after every change.** Repeated lint runs waste the user's tokens, especially for low-risk edits.
+
+## Skip lint (unless the user asks to run it)
+
+- Renames (functions, types, files, agent names, strings)
+- Comments, JSDoc, README, and other docs-only changes
+- Import path updates with no logic change
+- Formatting and cosmetic refactors with identical behavior
+
+After these edits: summarize what changed and tell the user they can run `npm run lint` if they want verification.
+
+## Run lint when it actually matters
+
+- ESLint config or rule changes
+- Logic, control flow, or syntax that could violate project rules (e.g. new `void` operator, explicit `: void` return types, brace style)
+- User explicitly asks to run or fix lint
+- User reports a lint failure
+- You are unsure a change complies with configured rules (e.g. non-trivial refactor)
+
+When you do run lint, prefer targeting changed files when possible instead of the full project every time.

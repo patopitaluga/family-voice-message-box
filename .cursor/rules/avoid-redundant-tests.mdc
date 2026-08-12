@@ -1,0 +1,26 @@
+---
+description: Do not run the test suite after every edit — saves tokens and time
+alwaysApply: true
+---
+
+# Tests: run only when warranted
+
+**Do not run `npm test` (or integration tests) after every change.** Repeated full test runs waste the user's tokens, especially for low-risk edits.
+
+## Skip tests (unless the user asks to run them)
+
+- Renames (functions, types, files, agent names, strings)
+- Comments, JSDoc, README, and other docs-only changes
+- Import path updates with no logic change
+- Formatting and cosmetic refactors with identical behavior
+
+After these edits: summarize what changed and tell the user they can run `npm test` if they want verification.
+
+## Run tests when it actually matters
+
+- Logic, control flow, or API behavior changed
+- User explicitly asks to run or fix tests
+- User reports a test failure
+- You are unsure a change is behavior-preserving (e.g. non-trivial refactor)
+
+When you do run tests, prefer targeted checks when possible instead of the full suite every time.

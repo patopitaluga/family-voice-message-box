@@ -1,0 +1,54 @@
+---
+description: JSDoc documents where symbols are used, not what obvious names already say
+globs: **/*.{ts,mjs,vue}
+alwaysApply: true
+---
+
+# JSDoc: usage over repetition
+
+When a function, constant, or type has a clear name and a short body, **do not** repeat what it does in JSDoc. Document **where it is used** instead.
+
+## Required
+
+Before finishing any edit to a `.ts`, `.mjs`, or `.vue` file:
+
+1. **Every export** (`export function`, `export const`, `export type`, `export class`) must have a JSDoc block listing importers or call sites.
+2. **Every non-export function** in the file must have JSDoc listing its caller(s), unless it qualifies to skip under [When to skip JSDoc](#when-to-skip-jsdoc) below.
+3. **New files** — audit all exports and internal functions; do not leave parsers, factories, or helpers undocumented.
+
+If you add a symbol without JSDoc, add the comment in the same change — do not defer it.
+
+## Exports
+
+List importers and call sites:
+
+```typescript
+/** Imported in `cronjob.ts`. Used in CLI (`npm run exercises`). */
+export async function getExercises(userPrompt: string): Promise<ExercisesRunResult> {
+```
+
+```typescript
+/** Imported in `controllers/agent/instructions.ts` and `agent-interests-observer.ts`. */
+export function loadAgentContext(): string {
+```
+
+## Internal symbols
+
+List callers in the same file or module:
+
+```typescript
+/** Used in `generateDailyExercises`. */
+function createExercisesAgent(studyPlan: string, today: StudyPlanDate): Agent {
+```
+
+## When to add more
+
+Add a one-line purpose **only** when the name is ambiguous, the behavior is non-obvious, or there is an important constraint callers must know (for example "always calls OpenAI" vs reading from disk).
+
+## When to skip JSDoc
+
+Skip JSDoc when a private helper is used once, immediately above or below, and the name is self-explanatory.
+
+## File headers
+
+A brief file-level comment is fine for module purpose. Per-symbol JSDoc still follows the rules above.

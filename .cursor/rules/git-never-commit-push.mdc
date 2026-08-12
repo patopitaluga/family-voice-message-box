@@ -1,0 +1,21 @@
+---
+description: Never commit or push to git — the user owns all repository history
+alwaysApply: true
+---
+
+# Git: never commit or push
+
+**Do not run `git commit`, `git push`, or any command that creates or publishes commits** for this repository unless the user explicitly asks you to in that message.
+
+This includes:
+
+- Initial commits or “helping” publish the repo to GitHub
+- Committing fixes, rules, or docs “while you’re at it”
+- Pushing after a commit the user did not request
+
+When git work is needed without an explicit commit request:
+
+- Explain what changed and tell the user which commands to run themselves
+- You may run read-only git commands (`git status`, `git diff`, `git log`) to answer questions
+
+The user is the sole author of this repository. Agent-created commits pollute GitHub contributor history and must not happen.

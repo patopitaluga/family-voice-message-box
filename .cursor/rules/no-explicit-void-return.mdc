@@ -1,0 +1,29 @@
+---
+description: Omit explicit : void function return types; TypeScript infers them
+globs: **/*.{ts,mjs,vue}
+alwaysApply: false
+---
+
+# No explicit `: void` return types
+
+Do not annotate functions with an explicit `: void` return type when TypeScript can infer it from the body.
+
+```typescript
+// Good — caller handles fire-and-forget and errors
+askLlmToIdentifyInterests(userPrompt, assistantResponse, source).catch((error) => {
+  logTurnError('interests identification failed', error, { source });
+});
+
+function logLiveRequestStart(contextLabel: string, request: TracedRequest) {
+  console.log(contextLabel, request);
+}
+
+// Bad — redundant annotation
+export function runAfterTurn(...): void {
+  askLlmToIdentifyInterests(...).catch(handleError);
+}
+```
+
+Keep explicit return types when they carry information TypeScript cannot infer (for example `Promise<string>`, `AgentLoopResult`, union types).
+
+`Promise<void>` and callback types like `() => void` in type positions are fine; this rule applies only to function/method return type annotations. For the `void` operator on expressions, see `no-void-operator.mdc`.
