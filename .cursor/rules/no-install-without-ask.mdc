@@ -1,0 +1,29 @@
+---
+description: Never install packages or system deps without explicit user approval
+alwaysApply: true
+---
+
+# Dependencies: ask before installing
+
+**Do not install anything without the user’s explicit approval in that message.**
+
+This includes:
+
+- `npm install` / `npm i` / `npm add` / `pnpm` / `yarn` (any new or updated package)
+- `brew install`, `apt`, `pip`, or other system/language package managers
+- Adding dependencies to `package.json` and installing them in the same step
+
+## When a dependency seems needed
+
+1. Explain **what** you want to add and **why**
+2. Show the exact command the user can run (e.g. `npm install node-global-key-listener`)
+3. Wait for them to install it (or to explicitly tell you to install it)
+4. Only then continue using that dependency in code
+
+## Do not
+
+- Run install commands “to keep going” or because a feature needs a library
+- Treat prior chats, README setup steps, or “we’ll need X later” as approval
+- Update existing packages (`npm update`, bumping versions) without being asked
+
+The user owns the dependency surface of this repository. Agent-initiated installs are not allowed.

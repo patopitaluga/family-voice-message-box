@@ -1,0 +1,27 @@
+{
+  "name": "family-voice-message-box",
+  "version": "0.1.0",
+  "description": "Caja con un botón para que un niño envíe mensajes de voz al grupo de Telegram de la familia y escuche las respuestas.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.7.0"
+  },
+  "scripts": {
+    "start": "node index.ts raspberry",
+    "start:dev": "node index.ts mac",
+    "play:last": "node play-last.ts",
+    "clear:recordings": "node clear-recordings.ts",
+    "lint": "eslint ."
+  },
+  "private": true,
+  "dependencies": {
+    "node-global-key-listener": "^0.3.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "eslint": "^10.8.1",
+    "typescript-eslint": "^8.67.0"
+  }
+}

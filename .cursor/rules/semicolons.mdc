@@ -1,0 +1,32 @@
+---
+description: Require semicolons at the end of TypeScript statements
+globs: **/*.{ts,mts,cts}
+alwaysApply: false
+---
+
+# Semicolons
+
+Always end TypeScript statements with a semicolon. This matches `@stylistic/semi: ['error', 'always']` in `eslint.config.mjs`.
+
+```typescript
+// Good
+import { join } from 'node:path';
+const mode = resolveBoxMode();
+return createMacAudioDevice();
+
+// Bad
+import { join } from 'node:path'
+const mode = resolveBoxMode()
+return createMacAudioDevice()
+```
+
+Also use semicolons between members in type/interface bodies:
+
+```typescript
+export type BoxMode = 'raspberry' | 'mac';
+
+export type AudioDevice = {
+  readonly name: string;
+  play(filePath: string): Promise<void>;
+};
+```
