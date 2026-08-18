@@ -7,7 +7,7 @@
 - [En este repositorio](#en-este-repositorio)
 - [Cómo empezar](#cómo-empezar)
   - [Setup](#setup)
-  - [Botón GPIO (Raspberry Pi)](#botón-gpio-raspberry-pi)
+  - [Botones GPIO (Raspberry Pi)](#botones-gpio-raspberry-pi)
   - [Configuración](#configuración)
   - [Dependencias del proyecto](#dependencias-del-proyecto)
   - [Ejecutar](#ejecutar)
@@ -30,9 +30,9 @@ Diseñada para acompañarlo donde esté: funciona con batería y no necesita est
 
 ## Cómo funciona
 
-1. **Pulsa** el botón y habla.
+1. **Pulsa y mantén** el botón de grabar (su LED se enciende) y habla.
 2. **Suéltalo** para enviar el mensaje al grupo familiar.
-3. **Escucha** cuando la familia responde.
+3. Cuando el LED del botón de **oír** esté encendido, púlsalo para escuchar el audio nuevo.
 
 Simple para el niño. Cercano para todos.
 
@@ -67,35 +67,29 @@ sudo apt install -y ffmpeg alsa-utils gpiod
 
 - `ffmpeg` — conversión a OGG/Opus para Telegram  
 - `alsa-utils` — `arecord` / `aplay`  
-- `gpiod` — `gpiomon` para el botón GPIO  
+- `gpiod` — `gpiomon` / `gpioset` para botones y LEDs GPIO  
 
 Instala Node 24.7+ (por ejemplo desde [NodeSource](https://github.com/nodesource/distributions) o el sitio oficial de Node).
 
-#### Botón GPIO (Raspberry Pi)
+#### Botones GPIO (Raspberry Pi)
 
-El software espera un **botón momentáneo active-low** en la línea GPIO **17** (numeración BCM), chip `gpiochip0`. El programa activa el **pull-up interno** (`gpiomon --bias=pull-up`): al pulsar, la línea baja a GND (falling = grabar); al soltar, vuelve a alto (rising = enviar).
+Hay **dos botones LED** (momentáneos, active-low, pull-up interno en el switch):
 
-**Conexión** (solo el botón; no hace falta resistencia externa):
+| Función | Switch (BCM) | Pin físico | LED (BCM) | Pin físico |
+|--------|--------------|------------|-----------|------------|
+| **Grabar** (mantener pulsado) | 17 | 11 | 27 | 13 |
+| **Oír** (última grabación / audio nuevo) | 22 | 15 | 23 | 16 |
 
-```text
-  Raspberry Pi (header 40 pines)
-  ================================
+- LED de **grabar**: se enciende mientras está pulsado (está grabando).
+- LED de **oír**: se enciende cuando hay audio nuevo pendiente; se apaga al reproducirlo.
+- GND compartido: p. ej. **pin 9**.
 
-   GPIO17 (pin 11, BCM 17) ----[ botón ]---- GND (pin 9)
-                            (momentáneo)
-```
+![Cableado de los botones LED en la Raspberry Pi](docs/button-gpio-wiring.svg)
 
-Vista esquemática:
+**Switch:** un lado al GPIO del botón, el otro a GND.  
+**LED del botón:** GPIO del LED → LED (con resistencia ~330 Ω si el botón no la trae) → GND. Nivel alto = encendido.
 
-```text
-   GPIO17 (pull-up interno ON)
-      |
-      o  o-------- GND
-    botón
-  (pulsar = cierra)
-```
-
-El default es `GPIO_LINE=17`. Si usas otra línea BCM, ponla en `.env` (opcional: `GPIO_CHIP` si no es `gpiochip0`).
+Variables opcionales en `.env`: `GPIO_RECORD_BUTTON`, `GPIO_RECORD_LED`, `GPIO_PLAY_BUTTON`, `GPIO_PLAY_LED`, `GPIO_CHIP` (default `gpiochip0`). `GPIO_LINE` sigue valiendo como alias del botón de grabar.
 
 #### macOS
 
@@ -195,9 +189,12 @@ npm install
 
 ### Ejecutar
 
-En ambos casos el proceso **queda corriendo** y se usa **un solo botón** (mantén pulsado para grabar, suelta para terminar):
+En ambos casos el proceso **queda corriendo**:
 
-En la Raspberry Pi (botón GPIO + `arecord` / `aplay`):
+En la Raspberry Pi (botones GPIO + LEDs + `arecord` / `aplay`):
+
+- Mantén pulsado **grabar** para hablar; suelta para enviar.
+- Cuando el LED de **oír** esté encendido, púlsalo para escuchar.
 
 ```bash
 npm start

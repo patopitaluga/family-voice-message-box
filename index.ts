@@ -7,7 +7,8 @@ import {
 import { getLatestRecordingPath } from './lib/get-latest-recording-path.ts';
 import { convertWavToOggOpus } from './lib/wav-to-ogg-opus.ts';
 import { listenToMacSpacebar } from './lib/mac-spacebar.ts';
-import { listenToRaspberryButton } from './lib/raspberry-button.ts';
+import { listenToRaspberryButtons } from './lib/raspberry-button.ts';
+import { createRaspberryGpioLed } from './lib/raspberry-gpio-led.ts';
 import { isRaspberryPiOsHost } from './lib/is-raspberry-pi-os-host.ts';
 import { tgRequireFamilyGroup, tgSendVoice } from './send-audio-tg.ts';
 
@@ -30,9 +31,30 @@ const audio = createAudioControl(platform);
 
 await mkdir('recordings', { recursive: true });
 
+const gpioChip = process.env.GPIO_CHIP ?? 'gpiochip0';
+const recordLedLine = Number(process.env.GPIO_RECORD_LED ?? '27');
+const playLedLine = Number(process.env.GPIO_PLAY_LED ?? '23');
+
+const recordLed =
+  platform === 'raspberry'
+    ? createRaspberryGpioLed(gpioChip, recordLedLine)
+    : undefined;
+const playLed =
+  platform === 'raspberry'
+    ? createRaspberryGpioLed(gpioChip, playLedLine)
+    : undefined;
+
 let currentRecordingPath: string | undefined;
 let recordingStartedAt: number | undefined;
 let isRecording = false;
+
+/** Used when inbound family audio arrives (and at startup if a recording exists). */
+function setUnheardAudio(pending: boolean): void {
+  playLed?.set(pending);
+}
+
+if (platform === 'raspberry' && (await getLatestRecordingPath()) !== undefined) setUnheardAudio(true);
+
 
 const handlers = {
   async onPress() {
@@ -43,6 +65,7 @@ const handlers = {
       `mensaje-${String(Date.now())}.wav`,
     );
     console.log('Grabando…');
+    recordLed?.set(true);
     await audio.startRecording(currentRecordingPath);
     recordingStartedAt = Date.now();
     isRecording = true;
@@ -53,6 +76,7 @@ const handlers = {
 
     isRecording = false;
     await audio.stopRecording();
+    recordLed?.set(false);
 
     const path = currentRecordingPath;
     const startedAt = recordingStartedAt;
@@ -111,21 +135,25 @@ const handlers = {
     const latestPath = await getLatestRecordingPath();
     if (!latestPath) {
       console.log('No hay grabaciones para reproducir.');
+      setUnheardAudio(false);
       return;
     }
 
     console.log(`Reproduciendo ${latestPath}`);
     await audio.play(latestPath);
+    setUnheardAudio(false);
   },
 };
 
 const stopListening =
   platform === 'mac'
     ? await listenToMacSpacebar(handlers)
-    : listenToRaspberryButton(handlers);
+    : listenToRaspberryButtons(handlers);
 
 const shutdown = (): void => {
   stopListening();
+  recordLed?.close();
+  playLed?.close();
   process.exit(0);
 };
 
@@ -138,7 +166,8 @@ if (platform === 'mac') console.log(
     'Mantén pulsado espacio para grabar. Pulsa p para oír la última. Ctrl+C para salir.',
   );
  else console.log(
-    `Esperando el botón (GPIO ${process.env.GPIO_LINE ?? '17'}). Ctrl+C para salir.`,
+    `Botón grabar: GPIO ${process.env.GPIO_RECORD_BUTTON ?? process.env.GPIO_LINE ?? '17'} (LED ${String(recordLedLine)}). ` +
+      `Botón oír: GPIO ${process.env.GPIO_PLAY_BUTTON ?? '22'} (LED ${String(playLedLine)}). Ctrl+C para salir.`,
   );
 
 await new Promise(() => {

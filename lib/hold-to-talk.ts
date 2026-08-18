@@ -1,7 +1,7 @@
 /**
  * Shared by `mac-spacebar.ts` and `raspberry-button.ts`.
  * `onPress` / `onRelease` are push-to-talk (hold one control while speaking).
- * `onPlayLast` is optional Mac-only debug playback (`p` key).
+ * `onPlayLast` plays the latest audio (Mac `p` key or Raspberry play button).
  */
 export type HoldToTalkHandlers = {
   onPress: () => void | Promise<void>;

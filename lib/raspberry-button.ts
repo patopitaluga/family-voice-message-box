@@ -1,22 +1,34 @@
+/**
+ * Raspberry Pi physical controls: hold-to-talk record button and play button
+ * (both watched with `gpiomon`, active-low + internal pull-up).
+ * Used from `index.ts` for `npm start`.
+ */
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { HoldToTalkHandlers, StopListening } from './hold-to-talk.ts';
 
+/** Used in `listenToRaspberryButtons`. */
+export type RaspberryButtonLines = {
+  chip?: string;
+  /** BCM line for hold-to-talk (default 17, or `GPIO_RECORD_BUTTON` / `GPIO_LINE`). */
+  recordButton?: number;
+  /** BCM line for play-last press (default 22, or `GPIO_PLAY_BUTTON`). */
+  playButton?: number;
+};
+
 /**
- * Used in `index.ts` for `npm start` on the Raspberry Pi.
- * Watches a GPIO line with `gpiomon` (from `gpiod`). Default: active-low button
- * with internal pull-up (press = falling edge, release = rising edge).
+ * Used in `listenToRaspberryButtons`.
+ * Watches one active-low GPIO line; `onPress` / `onRelease` are optional.
  */
-export function listenToRaspberryButton(
-  handlers: HoldToTalkHandlers,
-  options?: {
-    chip?: string;
-    line?: number;
+function watchActiveLowButton(
+  chip: string,
+  line: number,
+  handlers: {
+    onPress?: () => void | Promise<void>;
+    onRelease?: () => void | Promise<void>;
   },
 ): StopListening {
-  const chip = options?.chip ?? process.env.GPIO_CHIP ?? 'gpiochip0';
-  const line = options?.line ?? Number(process.env.GPIO_LINE ?? '17');
+  if (!Number.isInteger(line) || line < 0) throw new Error(`Invalid GPIO button line: ${String(line)}`);
 
-  if (!Number.isInteger(line) || line < 0) throw new Error(`Invalid GPIO_LINE: ${String(process.env.GPIO_LINE)}`);
 
   let child: ChildProcess;
   try {
@@ -64,10 +76,11 @@ export function listenToRaspberryButton(
       const released = edge === '1' || edge === 'rising';
       if (!pressed && !released) continue;
 
+      const run = pressed ? handlers.onPress : handlers.onRelease;
+      if (run === undefined) continue;
       if (busy) continue;
 
       busy = true;
-      const run = pressed ? handlers.onPress : handlers.onRelease;
       void Promise.resolve(run()).finally(() => {
         busy = false;
       });
@@ -77,5 +90,47 @@ export function listenToRaspberryButton(
   return () => {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
 
+  };
+}
+
+/** Used when reading env defaults for button BCM lines. */
+function readLineEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) throw new Error(`Invalid ${name}: ${raw}`);
+  return value;
+}
+
+/**
+ * Used in `index.ts` for `npm start`.
+ * Record button: hold = press/release. Play button: press triggers `onPlayLast`.
+ */
+export function listenToRaspberryButtons(
+  handlers: HoldToTalkHandlers,
+  options?: RaspberryButtonLines,
+): StopListening {
+  const chip = options?.chip ?? process.env.GPIO_CHIP ?? 'gpiochip0';
+  const recordButton =
+    options?.recordButton ??
+    readLineEnv(
+      'GPIO_RECORD_BUTTON',
+      readLineEnv('GPIO_LINE', 17),
+    );
+  const playButton =
+    options?.playButton ?? readLineEnv('GPIO_PLAY_BUTTON', 22);
+
+  const stopRecord = watchActiveLowButton(chip, recordButton, {
+    onPress: handlers.onPress,
+    onRelease: handlers.onRelease,
+  });
+
+  const stopPlay = watchActiveLowButton(chip, playButton, {
+    onPress: handlers.onPlayLast,
+  });
+
+  return () => {
+    stopRecord();
+    stopPlay();
   };
 }
