@@ -10,11 +10,8 @@
   "scripts": {
     "start": "node --env-file=.env index.ts raspberry",
     "start:dev": "node --env-file=.env index.ts mac",
-    "play:last": "node play-last.ts",
-    "send:last": "node --env-file=.env send-last-tg.ts",
     "ping:tg": "node --env-file=.env ping-tg.ts",
     "find:group": "node --env-file=.env find-group-tg.ts",
-    "clear:recordings": "node clear-recordings.ts",
     "lint": "eslint ."
   },
   "private": true,

@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 /** Returned by `tgGetChat`; used when checking that `CHAT_ID` is a family group. */
@@ -77,7 +77,7 @@ export async function tgGetChat(
 }
 
 /**
- * Used in `ping-tg.ts`, `index.ts`, and `send-last-tg.ts`.
+ * Used in `ping-tg.ts` and `index.ts`.
  * Ensures `CHAT_ID` is a group/supergroup (the family Telegram group), not a DM.
  */
 export async function tgRequireFamilyGroup(
@@ -178,7 +178,7 @@ export async function tgSendMessage(
 }
 
 /**
- * Used in `index.ts` and `send-last-tg.ts`.
+ * Used in `index.ts`.
  * Sends an existing OGG/Opus file as a Telegram voice note (`sendVoice`).
  */
 export async function tgSendVoice(
@@ -207,4 +207,48 @@ export async function tgSendVoice(
       data.description ?? `Telegram sendVoice failed (${String(response.status)})`,
     );
 
+}
+
+/**
+ * Used in `listen-family-group-voices.ts`.
+ * Resolves a Telegram `file_id` to a downloadable path via `getFile`.
+ */
+export async function tgGetFilePath(
+  token: string,
+  fileId: string,
+): Promise<string> {
+  const response = await fetch(
+    `https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`,
+  );
+  const data = (await response.json()) as {
+    ok: boolean;
+    description?: string;
+    result?: { file_path?: string };
+  };
+
+  if (!data.ok || data.result?.file_path === undefined) throw new Error(
+      data.description ?? `Telegram getFile failed (${String(response.status)})`,
+    );
+
+  return data.result.file_path;
+}
+
+/**
+ * Used in `listen-family-group-voices.ts`.
+ * Downloads a bot file from Telegram into `destPath`.
+ */
+export async function tgDownloadFile(
+  token: string,
+  filePath: string,
+  destPath: string,
+): Promise<void> {
+  const response = await fetch(
+    `https://api.telegram.org/file/bot${token}/${filePath}`,
+  );
+
+  if (!response.ok) throw new Error(
+      `Telegram file download failed (${String(response.status)})`,
+    );
+
+  await writeFile(destPath, Buffer.from(await response.arrayBuffer()));
 }

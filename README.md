@@ -33,7 +33,7 @@ Diseñada para acompañarlo donde esté: funciona con batería y no necesita est
 
 1. **Pulsa y mantén** el botón de grabar (su LED se enciende) y habla.
 2. **Suéltalo** para enviar el mensaje al grupo familiar.
-3. Cuando el LED del botón de **oír** esté encendido, púlsalo para escuchar el audio nuevo.
+3. Cuando alguien responde con una nota de voz, el LED de **oír** se enciende; púlsalo para escuchar.
 
 Simple para el niño. Cercano para todos.
 
@@ -92,21 +92,21 @@ Hay **dos botones LED** (momentáneos, active-low, pull-up interno):
       +--+-----+-----+--+                +--+-----+-----+--+
          |     |     |                      |     |     |
          |     |     +----------+-----------+     |     |
-         |     |                |                  |     |
-         |     |                |                  |     |
-      GPIO27  GPIO17           GND              GPIO23  GPIO22
-      pin 13  pin 11         pin 9             pin 16  pin 15
+         |     |                |                 |     |
+         |     |                |                 |     |
+      GPIO27  GPIO17           GND             GPIO23  GPIO22
+      pin 13  pin 11         pin 9            pin 16  pin 15
                                     |
      ===============================================================
      pares  ->  2  4  6  8 10 12 14 16 18 20 22 24 26 28 30 32 34 36 38 40
-                |  |  |  |  |  |  |  *  |  |  |  |  |  |  |  |  |  |  |
+                |  |  |  |  |  |  |  *  |  |  |  |  |  |  |  |  |  |  |  |
      impares->  1  3  5  7  9 11 13 15 17 19 21 23 25 27 29 31 33 35 37 39
-                |  |  |  |  *  *  *  *  |  |  |  |  |  |  |  |  |  |  |
+                |  |  |  |  *  *  *  *  |  |  |  |  |  |  |  |  |  |  |  |
      +==========+==+==+==+==+==+==+==+==+==+==+==+==+==+==+==+==+==+==+==+
      |                                                                    |
-     |                         Raspberry Pi                             |
+     |                         Raspberry Pi                               |
      |                                                                    |
-     |     [HDMI]                         [USB] [USB]     [ETH]         |
+     |     [HDMI]                         [USB] [USB]     [ETH]           |
      |                                                                    |
      |  o                                                               o |
      +--------------------------------------------------------------------+
@@ -148,7 +148,7 @@ choco install ffmpeg nodejs
 ```
 
 Cierra y abre la terminal después de instalar para que `ffmpeg` y `node` estén en el `PATH`.  
-Nota: hoy el modo de desarrollo interactivo (`start:dev`) está pensado para macOS; en Windows puedes usar las herramientas de setup y scripts como `send:last` cuando tengas grabaciones.
+Nota: hoy el modo de desarrollo interactivo (`start:dev`) está pensado para macOS; en Windows puedes usar las herramientas de setup (`find:group`, `ping:tg`).
 
 ### Configuración
 
@@ -161,7 +161,7 @@ Crea un bot y ten listo el **grupo de Telegram de la familia** (puedes crear uno
 1. Abre Telegram y habla con [@BotFather](https://t.me/BotFather).
 2. Envía `/newbot` y sigue las instrucciones (nombre visible y username que termine en `bot`).
 3. BotFather te da un **token** parecido a `123456:ABC-DEF...`. Ese valor va en `TELEGRAM_TOKEN`.
-4. Desactiva la privacidad de grupo del bot (necesario para que vea la actividad del grupo familiar):
+4. Desactiva la privacidad de grupo del bot (necesario para que vea las notas de voz del grupo familiar):
    - En BotFather: `/mybots` → elige tu bot → **Bot Settings** → **Group Privacy** → **Turn off**.
    - También puedes usar `/setprivacy` → elige el bot → **Disable**.
 
@@ -223,8 +223,8 @@ En ambos casos el proceso **queda corriendo**:
 
 En la Raspberry Pi (botones GPIO + LEDs + `arecord` / `aplay`):
 
-- Mantén pulsado **grabar** para hablar; suelta para enviar.
-- Cuando el LED de **oír** esté encendido, púlsalo para escuchar.
+- Mantén pulsado **grabar** para hablar; suelta para enviar al grupo (el audio solo vive en `temp/` hasta enviarse).
+- Cuando alguien del grupo envía una nota de voz, el LED de **oír** se enciende; púlsalo para escucharla.
 
 ```bash
 npm start
@@ -232,27 +232,15 @@ npm start
 
 Sin pantalla ni teclado, en la Pi conviene el [arranque automático](#arranque-automático-raspberry-pi) en lugar de lanzar `npm start` a mano.
 
-En la Mac, durante el desarrollo (espacio para grabar, `p` para oír la última):
+En la Mac, durante el desarrollo (espacio para grabar, `p` para oír audios del grupo). Los LEDs de grabar/oír se reflejan en consola (`●`/`○`) con la misma lógica que en la Pi:
 
 ```bash
 npm run start:dev
 ```
 
-**Calidad de audio en Mac (`start:dev`):** puede sonar mal — baja calidad, clicks y microcortes. No es un fallo de este proyecto ni del terminal: en macOS, la captura por `ffmpeg` + AVFoundation tiene ese problema conocido. El modo dev sirve para probar el flujo (botón, tiempos, archivos), no para juzgar la calidad final del micrófono. La calidad real se evalúa en la Raspberry Pi (`npm start`).
+**Calidad de audio en Mac (`start:dev`):** puede sonar mal — baja calidad, clicks y microcortes. No es un fallo de este proyecto ni del terminal: en macOS, la captura por `ffmpeg` + AVFoundation tiene ese problema conocido. El modo dev sirve para probar el flujo (botón, tiempos, Telegram), no para juzgar la calidad final del micrófono. La calidad real se evalúa en la Raspberry Pi (`npm start`).
 
 Ctrl+C para salir.
-
-Para escuchar la última grabación:
-
-```bash
-npm run play:last
-```
-
-Para reenviar la última grabación al grupo de Telegram de la familia (usa `.env`):
-
-```bash
-npm run send:last
-```
 
 Para descubrir el `CHAT_ID` del grupo familiar (mientras el comando espera, envía `/start@TuBot` en el grupo):
 
@@ -264,12 +252,6 @@ Para enviar un mensaje `pong` al grupo familiar (usa `.env`):
 
 ```bash
 npm run ping:tg
-```
-
-Para vaciar la carpeta `recordings/`:
-
-```bash
-npm run clear:recordings
 ```
 
 ### Arranque automático (Raspberry Pi)

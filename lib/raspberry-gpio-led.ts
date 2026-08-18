@@ -1,25 +1,16 @@
 /**
  * Drives a GPIO line as an LED using `gpioset --mode=signal` (from `gpiod`).
- * Used from `index.ts` for the record and play illuminated buttons.
+ * Used from `index.ts` (via `combineLeds`) for the record and play illuminated buttons.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-
-/** Returned by `createRaspberryGpioLed`; used in `index.ts`. */
-export type GpioLed = {
-  set(on: boolean): void;
-  close(): void;
-};
+import type { Led } from './type-led.ts';
 
 /**
  * Used in `index.ts` for Raspberry illuminated buttons.
  * Keeps a `gpioset` process alive so the line stays driven.
  */
-export function createRaspberryGpioLed(
-  chip: string,
-  line: number,
-): GpioLed {
+export function createRaspberryGpioLed(chip: string, line: number): Led {
   if (!Number.isInteger(line) || line < 0) throw new Error(`Invalid GPIO LED line: ${String(line)}`);
-
 
   let child: ChildProcess | undefined;
 

@@ -1,16 +1,23 @@
-import { mkdir, stat, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import { stat, unlink } from 'node:fs/promises';
 import {
   createAudioControl,
   parsePlatform,
 } from './lib/create-audio-control.ts';
-import { getLatestRecordingPath } from './lib/get-latest-recording-path.ts';
+import { convertOggOpusToWav } from './lib/ogg-opus-to-wav.ts';
 import { convertWavToOggOpus } from './lib/wav-to-ogg-opus.ts';
 import { listenToMacSpacebar } from './lib/mac-spacebar.ts';
 import { listenToRaspberryButtons } from './lib/raspberry-button.ts';
+import { combineLeds } from './lib/combine-leds.ts';
+import { createConsoleLedPair } from './lib/create-console-led-pair.ts';
 import { createRaspberryGpioLed } from './lib/raspberry-gpio-led.ts';
 import { isRaspberryPiOsHost } from './lib/is-raspberry-pi-os-host.ts';
-import { tgRequireFamilyGroup, tgSendVoice } from './send-audio-tg.ts';
+import { listenToFamilyGroupVoices } from './lib/listen-family-group-voices.ts';
+import { ensureTempDir, tempPath } from './lib/temp-dir.ts';
+import {
+  tgGetMe,
+  tgRequireFamilyGroup,
+  tgSendVoice,
+} from './send-audio-tg.ts';
 
 const telegramToken = process.env.TELEGRAM_TOKEN?.trim();
 const chatId = process.env.CHAT_ID?.trim();
@@ -18,7 +25,8 @@ const chatId = process.env.CHAT_ID?.trim();
 if (!telegramToken) throw new Error('TELEGRAM_TOKEN is not set');
 if (!chatId) throw new Error('CHAT_ID is not set');
 
-await tgRequireFamilyGroup(telegramToken, chatId);
+const familyGroup = await tgRequireFamilyGroup(telegramToken, chatId);
+const bot = await tgGetMe(telegramToken);
 
 const platform = parsePlatform();
 
@@ -29,43 +37,41 @@ if (platform === 'raspberry' && !isRaspberryPiOsHost()) {
 
 const audio = createAudioControl(platform);
 
-await mkdir('recordings', { recursive: true });
+await ensureTempDir();
 
 const gpioChip = process.env.GPIO_CHIP ?? 'gpiochip0';
 const recordLedLine = Number(process.env.GPIO_RECORD_LED ?? '27');
 const playLedLine = Number(process.env.GPIO_PLAY_LED ?? '23');
 
+const consoleLeds = createConsoleLedPair();
 const recordLed =
   platform === 'raspberry'
-    ? createRaspberryGpioLed(gpioChip, recordLedLine)
-    : undefined;
+    ? combineLeds(createRaspberryGpioLed(gpioChip, recordLedLine), consoleLeds.record)
+    : consoleLeds.record;
 const playLed =
   platform === 'raspberry'
-    ? createRaspberryGpioLed(gpioChip, playLedLine)
-    : undefined;
+    ? combineLeds(createRaspberryGpioLed(gpioChip, playLedLine), consoleLeds.play)
+    : consoleLeds.play;
 
 let currentRecordingPath: string | undefined;
 let recordingStartedAt: number | undefined;
 let isRecording = false;
 
-/** Used when inbound family audio arrives (and at startup if a recording exists). */
+/** Local OGG paths from the family group, waiting to be played. */
+const pendingInboundOggs: string[] = [];
+
+/** Used when a family voice arrives or after play drains the queue. */
 function setUnheardAudio(pending: boolean): void {
-  playLed?.set(pending);
+  playLed.set(pending);
 }
-
-if (platform === 'raspberry' && (await getLatestRecordingPath()) !== undefined) setUnheardAudio(true);
-
 
 const handlers = {
   async onPress() {
     if (isRecording) return;
 
-    currentRecordingPath = join(
-      'recordings',
-      `mensaje-${String(Date.now())}.wav`,
-    );
+    currentRecordingPath = tempPath(`out-${String(Date.now())}.wav`);
     console.log('Grabando…');
-    recordLed?.set(true);
+    recordLed.set(true);
     await audio.startRecording(currentRecordingPath);
     recordingStartedAt = Date.now();
     isRecording = true;
@@ -76,9 +82,9 @@ const handlers = {
 
     isRecording = false;
     await audio.stopRecording();
-    recordLed?.set(false);
+    recordLed.set(false);
 
-    const path = currentRecordingPath;
+    const wavPath = currentRecordingPath;
     const startedAt = recordingStartedAt;
     currentRecordingPath = undefined;
     recordingStartedAt = undefined;
@@ -87,8 +93,8 @@ const handlers = {
       startedAt === undefined ? undefined : Date.now() - startedAt;
 
     let sizeLabel = 'tamaño desconocido';
-    if (path !== undefined) try {
-        const { size } = await stat(path);
+    if (wavPath !== undefined) try {
+        const { size } = await stat(wavPath);
         if (size < 1024) sizeLabel = `${String(size)} B`;
          else if (size < 1024 * 1024) sizeLabel = `${(size / 1024).toFixed(1)} KB`;
          else sizeLabel = `${(size / (1024 * 1024)).toFixed(2)} MB`;
@@ -109,51 +115,76 @@ const handlers = {
     }
 
     console.log(
-      `Grabación lista: ${path ?? '(sin archivo)'} (${durationLabel}, ${sizeLabel})`,
+      `Grabación lista (${durationLabel}, ${sizeLabel})`,
     );
 
-    if (path !== undefined) {
-      let oggPath: string | undefined;
-      try {
-        console.log('Convirtiendo a OGG/Opus…');
-        oggPath = await convertWavToOggOpus(path);
-        console.log('Enviando a Telegram…');
-        await tgSendVoice(telegramToken, chatId, oggPath);
-        console.log('Enviado a Telegram.');
-      } catch (error: unknown) {
-        console.error('No se pudo enviar a Telegram:', error);
-      } finally {
-        if (oggPath !== undefined) await unlink(oggPath).catch(() => undefined);
+    if (wavPath === undefined) return;
 
-      }
+    let oggPath: string | undefined;
+    try {
+      console.log('Convirtiendo a OGG/Opus…');
+      oggPath = await convertWavToOggOpus(wavPath, tempPath(`out-${String(Date.now())}.ogg`));
+      await unlink(wavPath).catch(() => undefined);
+
+      console.log('Enviando a Telegram…');
+      await tgSendVoice(telegramToken, chatId, oggPath);
+      console.log('Enviado a Telegram.');
+      consoleLeds.show();
+    } catch (error: unknown) {
+      console.error('No se pudo enviar a Telegram:', error);
+    } finally {
+      if (oggPath !== undefined) await unlink(oggPath).catch(() => undefined);
+      await unlink(wavPath).catch(() => undefined);
     }
   },
 
   async onPlayLast() {
     if (isRecording) return;
 
-    const latestPath = await getLatestRecordingPath();
-    if (!latestPath) {
-      console.log('No hay grabaciones para reproducir.');
-      setUnheardAudio(false);
+    const oggPath = pendingInboundOggs.shift();
+    setUnheardAudio(pendingInboundOggs.length > 0);
+
+    if (oggPath === undefined) {
+      console.log('No hay audios nuevos del grupo para reproducir.');
       return;
     }
 
-    console.log(`Reproduciendo ${latestPath}`);
-    await audio.play(latestPath);
-    setUnheardAudio(false);
+    let wavPath: string | undefined;
+    try {
+      console.log('Reproduciendo audio del grupo…');
+      wavPath = await convertOggOpusToWav(oggPath);
+      await audio.play(wavPath);
+      await unlink(oggPath).catch(() => undefined);
+    } catch (error: unknown) {
+      console.error('No se pudo reproducir el audio:', error);
+      pendingInboundOggs.unshift(oggPath);
+      setUnheardAudio(true);
+    } finally {
+      if (wavPath !== undefined) await unlink(wavPath).catch(() => undefined);
+    }
   },
 };
 
-const stopListening =
+const stopButtons =
   platform === 'mac'
     ? await listenToMacSpacebar(handlers)
     : listenToRaspberryButtons(handlers);
 
+const stopTelegram = listenToFamilyGroupVoices({
+  token: telegramToken,
+  chatId,
+  botId: bot.id,
+  async onVoiceDownloaded(localOggPath) {
+    pendingInboundOggs.push(localOggPath);
+    setUnheardAudio(true);
+  },
+});
+
 const shutdown = (): void => {
-  stopListening();
-  recordLed?.close();
-  playLed?.close();
+  stopTelegram();
+  stopButtons();
+  recordLed.close();
+  playLed.close();
   process.exit(0);
 };
 
@@ -161,13 +192,18 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 console.log(`Family Voice Message Box — ${audio.name}`);
+console.log(
+  `Grupo: ${familyGroup.title ?? '(sin título)'}  CHAT_ID=${String(familyGroup.id)}`,
+);
 
 if (platform === 'mac') console.log(
-    'Mantén pulsado espacio para grabar. Pulsa p para oír la última. Ctrl+C para salir.',
+    'Mantén pulsado espacio para grabar. Pulsa p para oír audios del grupo. ' +
+      'LEDs en consola (●/○). Ctrl+C para salir.',
   );
  else console.log(
     `Botón grabar: GPIO ${process.env.GPIO_RECORD_BUTTON ?? process.env.GPIO_LINE ?? '17'} (LED ${String(recordLedLine)}). ` +
-      `Botón oír: GPIO ${process.env.GPIO_PLAY_BUTTON ?? '22'} (LED ${String(playLedLine)}). Ctrl+C para salir.`,
+      `Botón oír: GPIO ${process.env.GPIO_PLAY_BUTTON ?? '22'} (LED ${String(playLedLine)}). ` +
+      'LEDs también en consola (●/○). Ctrl+C para salir.',
   );
 
 await new Promise(() => {

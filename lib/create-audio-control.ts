@@ -1,16 +1,16 @@
 /**
  * Factory for the platform audio control (record + play).
- * Used from `index.ts` and `play-last.ts`.
+ * Used from `index.ts`.
  */
 import type { AudioControl } from './type-audio-control.ts';
 import { createMacAudioControl } from './mac-audio.ts';
 import { createRaspberryAudioControl } from './raspberry-audio.ts';
 
-/** Used in `index.ts` and `play-last.ts`. Passed as argv by npm scripts. */
+/** Used in `index.ts`. Passed as argv by npm scripts. */
 export type Platform = 'raspberry' | 'mac';
 
 /**
- * Used in `index.ts` and `play-last.ts`.
+ * Used in `index.ts`.
  */
 export function createAudioControl(platform: Platform): AudioControl {
   if (platform === 'mac') return createMacAudioControl();
@@ -19,8 +19,8 @@ export function createAudioControl(platform: Platform): AudioControl {
 }
 
 /**
- * Used in `index.ts` and `play-last.ts` to read the platform argv from
- * `npm start` / `npm run start:dev` / `npm run play:last`.
+ * Used in `index.ts` to read the platform argv from
+ * `npm start` / `npm run start:dev`.
  */
 export function parsePlatform(
   value: string | undefined = process.argv[2],

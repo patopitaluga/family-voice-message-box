@@ -1,7 +1,7 @@
 import { runAudioCommand } from './run-audio-command.ts';
 
 /**
- * Used in `index.ts` and `send-last-tg.ts` before `tgSendVoice`.
+ * Used in `index.ts` and previously `send-last-tg.ts` before `tgSendVoice`.
  * Writes an OGG/Opus file next to the WAV (or to `oggPath` when provided).
  */
 export async function convertWavToOggOpus(
