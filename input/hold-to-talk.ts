@@ -1,5 +1,5 @@
 /**
- * Shared by `mac-spacebar.ts`, `raspberry-button.ts`, and `listen-for-hold.ts`.
+ * Shared by `mac-spacebar.ts` and `raspberry-button.ts`.
  * `onPress` / `onRelease` are push-to-talk (hold one control while speaking).
  * `onPlayLast` is optional Mac-only debug playback (`p` key).
  */
@@ -10,7 +10,7 @@ export type HoldToTalkHandlers = {
 };
 
 /**
- * Shared by `mac-spacebar.ts`, `raspberry-button.ts`, and `listen-for-hold.ts`.
+ * Shared by `mac-spacebar.ts` and `raspberry-button.ts`.
  * Call to detach listeners and free OS resources.
  */
 export type StopListening = () => void;

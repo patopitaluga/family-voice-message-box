@@ -19,7 +19,7 @@ async function ensureMacKeyServerExecutable(): Promise<string> {
 }
 
 /**
- * Used in `listen-for-hold.ts` for `npm run start:dev`.
+ * Used in `index.ts` for `npm run start:dev`.
  * Hold space to talk, release to stop; `p` plays the latest recording.
  * Uses OS key-up/key-down (not the terminal), so macOS key-repeat cannot
  * fake extra presses. Needs Accessibility permission on macOS.

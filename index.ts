@@ -1,37 +1,27 @@
-import { mkdir, stat } from 'node:fs/promises';
+import { mkdir, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   createAudioDevice,
   resolveBoxMode,
 } from './audio/create-audio-device.ts';
 import { findLatestRecordingPath } from './audio/latest-recording.ts';
-import { listenForHold } from './input/listen-for-hold.ts';
+import { convertWavToOggOpus } from './audio/wav-to-ogg-opus.ts';
+import { listenToMacSpacebar } from './input/mac-spacebar.ts';
+import { listenToRaspberryButton } from './input/raspberry-button.ts';
 import { assertRaspberryPiOs } from './platform/assert-raspberry-pi-os.ts';
+import { tgRequireFamilyGroup, tgSendVoice } from './send-audio-tg.ts';
 
-/** Used in the "Grabación lista" log line. */
-function formatDuration(milliseconds: number): string {
-  const seconds = milliseconds / 1000;
-  if (seconds < 60) {
-    return `${seconds.toFixed(1)} s`;
-  }
+const telegramToken = process.env.TELEGRAM_TOKEN?.trim();
+const chatId = process.env.CHAT_ID?.trim();
 
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds - minutes * 60;
-  return `${String(minutes)} m ${remainder.toFixed(1)} s`;
+if (!telegramToken) {
+  throw new Error('TELEGRAM_TOKEN is not set');
+}
+if (!chatId) {
+  throw new Error('CHAT_ID is not set');
 }
 
-/** Used in the "Grabación lista" log line. */
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) {
-    return `${String(bytes)} B`;
-  }
-
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
+await tgRequireFamilyGroup(telegramToken, chatId);
 
 const mode = resolveBoxMode();
 
@@ -47,7 +37,7 @@ let currentRecordingPath: string | undefined;
 let recordingStartedAt: number | undefined;
 let isRecording = false;
 
-const stopListening = await listenForHold(mode, {
+const handlers = {
   async onPress() {
     if (isRecording) {
       return;
@@ -83,18 +73,50 @@ const stopListening = await listenForHold(mode, {
     if (path !== undefined) {
       try {
         const { size } = await stat(path);
-        sizeLabel = formatFileSize(size);
+        if (size < 1024) {
+          sizeLabel = `${String(size)} B`;
+        } else if (size < 1024 * 1024) {
+          sizeLabel = `${(size / 1024).toFixed(1)} KB`;
+        } else {
+          sizeLabel = `${(size / (1024 * 1024)).toFixed(2)} MB`;
+        }
       } catch {
         sizeLabel = 'archivo no encontrado';
       }
     }
 
-    const durationLabel =
-      durationMs === undefined ? 'duración desconocida' : formatDuration(durationMs);
+    let durationLabel = 'duración desconocida';
+    if (durationMs !== undefined) {
+      const seconds = durationMs / 1000;
+      if (seconds < 60) {
+        durationLabel = `${seconds.toFixed(1)} s`;
+      } else {
+        const minutes = Math.floor(seconds / 60);
+        const remainder = seconds - minutes * 60;
+        durationLabel = `${String(minutes)} m ${remainder.toFixed(1)} s`;
+      }
+    }
 
     console.log(
       `Grabación lista: ${path ?? '(sin archivo)'} (${durationLabel}, ${sizeLabel})`,
     );
+
+    if (path !== undefined) {
+      let oggPath: string | undefined;
+      try {
+        console.log('Convirtiendo a OGG/Opus…');
+        oggPath = await convertWavToOggOpus(path);
+        console.log('Enviando a Telegram…');
+        await tgSendVoice(telegramToken, chatId, oggPath);
+        console.log('Enviado a Telegram.');
+      } catch (error: unknown) {
+        console.error('No se pudo enviar a Telegram:', error);
+      } finally {
+        if (oggPath !== undefined) {
+          await unlink(oggPath).catch(() => undefined);
+        }
+      }
+    }
   },
 
   async onPlayLast() {
@@ -111,7 +133,12 @@ const stopListening = await listenForHold(mode, {
     console.log(`Reproduciendo ${latestPath}`);
     await audio.play(latestPath);
   },
-});
+};
+
+const stopListening =
+  mode === 'mac'
+    ? await listenToMacSpacebar(handlers)
+    : listenToRaspberryButton(handlers);
 
 const shutdown = (): void => {
   stopListening();

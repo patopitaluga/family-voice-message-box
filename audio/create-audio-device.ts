@@ -2,11 +2,11 @@ import type { AudioDevice } from './audio-device.ts';
 import { createMacAudioDevice } from './mac-audio.ts';
 import { createRaspberryAudioDevice } from './raspberry-audio.ts';
 
-/** Used in `index.ts` and `listen-for-hold.ts`. Passed as argv by npm scripts. */
+/** Used in `index.ts` and `play-last.ts`. Passed as argv by npm scripts. */
 export type BoxMode = 'raspberry' | 'mac';
 
 /**
- * Used in `index.ts`.
+ * Used in `index.ts` and `play-last.ts`.
  */
 export function createAudioDevice(mode: BoxMode): AudioDevice {
   if (mode === 'mac') {
@@ -17,7 +17,8 @@ export function createAudioDevice(mode: BoxMode): AudioDevice {
 }
 
 /**
- * Used in `index.ts` to read the mode argv from `npm start` / `npm run start:dev`.
+ * Used in `index.ts` and `play-last.ts` to read the mode argv from
+ * `npm start` / `npm run start:dev` / `npm run play:last`.
  */
 export function resolveBoxMode(
   value: string | undefined = process.argv[2],

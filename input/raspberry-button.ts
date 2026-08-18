@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import type { HoldToTalkHandlers, StopListening } from './hold-to-talk.ts';
 
 /**
- * Used in `listen-for-hold.ts` for `npm start` on the Raspberry Pi.
+ * Used in `index.ts` for `npm start` on the Raspberry Pi.
  * Watches a GPIO line with `gpiomon` (from `gpiod`). Default: active-low button
  * (press = falling edge, release = rising edge).
  */
