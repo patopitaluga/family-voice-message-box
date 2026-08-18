@@ -84,10 +84,35 @@ Hay **dos botones LED** (momentáneos, active-low, pull-up interno en el switch)
 - LED de **oír**: se enciende cuando hay audio nuevo pendiente; se apaga al reproducirlo.
 - GND compartido: p. ej. **pin 9**.
 
-![Cableado de los botones LED en la Raspberry Pi](docs/button-gpio-wiring.svg)
+```text
+                         GRABAR                         OÍR
+                      ┌──────────┐                 ┌──────────┐
+                      │ LED   SW  │                 │ LED   SW  │
+                      └──┬────┬───┘                 └──┬────┬───┘
+                         │    │                        │    │
+            GPIO27 ──────┘    │                        │    └────── GPIO22
+            (pin 13)          │                        │         (pin 15)
+            GPIO17 ───────────┘                        │
+            (pin 11)         GND ──────────────────────────┼────── GPIO23
+                             (pin 9)                     │      (pin 16)
+                               │                         │
+     ════════════════════════════════════════════════════╪════════
+     pin →  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 …
+            │  │  │  │  │  │  │  │  ★  │  ★  │  ★  │  ★  ★  │
+     ╔══════╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══════╗
+     ║ ○                                                        ○  ║
+     ║                                                             ║
+     ║                      Raspberry Pi                          ║
+     ║                                                             ║
+     ║   [HDMI]                         [USB] [USB]     [ETH]     ║
+     ║                                                             ║
+     ║ ○                                                        ○  ║
+     ╚═════════════════════════════════════════════════════════════╝
 
-**Switch:** un lado al GPIO del botón, el otro a GND.  
-**LED del botón:** GPIO del LED → LED (con resistencia ~330 Ω si el botón no la trae) → GND. Nivel alto = encendido.
+     ★ = pines usados
+     Switch: GPIO → botón → GND (active-low, pull-up interno)
+     LED:    GPIO → LED (+ ~330Ω si hace falta) → GND (alto = encendido)
+```
 
 Variables opcionales en `.env`: `GPIO_RECORD_BUTTON`, `GPIO_RECORD_LED`, `GPIO_PLAY_BUTTON`, `GPIO_PLAY_LED`, `GPIO_CHIP` (default `gpiochip0`). `GPIO_LINE` sigue valiendo como alias del botón de grabar.
 
