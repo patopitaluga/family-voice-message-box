@@ -1,0 +1,19 @@
+[Unit]
+Description=Family Voice Message Box
+Documentation=file://__APP_DIR__/README.md
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+WorkingDirectory=__APP_DIR__
+# Loads TELEGRAM_TOKEN / CHAT_ID / GPIO_* for the process environment.
+EnvironmentFile=-__APP_DIR__/.env
+ExecStart=__NODE__ --env-file=.env index.ts raspberry
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

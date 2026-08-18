@@ -11,6 +11,7 @@
   - [Configuración](#configuración)
   - [Dependencias del proyecto](#dependencias-del-proyecto)
   - [Ejecutar](#ejecutar)
+  - [Arranque automático (Raspberry Pi)](#arranque-automático-raspberry-pi)
 - [Estado](#estado)
 - [Licencia](#licencia)
 
@@ -73,10 +74,10 @@ Instala Node 24.7+ (por ejemplo desde [NodeSource](https://github.com/nodesource
 
 #### Botones GPIO (Raspberry Pi)
 
-Hay **dos botones LED** (momentáneos, active-low, pull-up interno en el switch):
+Hay **dos botones LED** (momentáneos, active-low, pull-up interno):
 
-| Función | Switch (BCM) | Pin físico | LED (BCM) | Pin físico |
-|--------|--------------|------------|-----------|------------|
+| Función | Botón (BCM) | Pin físico | LED (BCM) | Pin físico |
+|--------|-------------|------------|-----------|------------|
 | **Grabar** (mantener pulsado) | 17 | 11 | 27 | 13 |
 | **Oír** (última grabación / audio nuevo) | 22 | 15 | 23 | 16 |
 
@@ -85,33 +86,32 @@ Hay **dos botones LED** (momentáneos, active-low, pull-up interno en el switch)
 - GND compartido: p. ej. **pin 9**.
 
 ```text
-                         GRABAR                         OÍR
-                      ┌──────────┐                 ┌──────────┐
-                      │ LED   SW  │                 │ LED   SW  │
-                      └──┬────┬───┘                 └──┬────┬───┘
-                         │    │                        │    │
-            GPIO27 ──────┘    │                        │    └────── GPIO22
-            (pin 13)          │                        │         (pin 15)
-            GPIO17 ───────────┘                        │
-            (pin 11)         GND ──────────────────────────┼────── GPIO23
-                             (pin 9)                     │      (pin 16)
-                               │                         │
-     ════════════════════════════════════════════════════╪════════
-     pin →  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 …
-            │  │  │  │  │  │  │  │  ★  │  ★  │  ★  │  ★  ★  │
-     ╔══════╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══════╗
-     ║ ○                                                        ○  ║
-     ║                                                             ║
-     ║                      Raspberry Pi                          ║
-     ║                                                             ║
-     ║   [HDMI]                         [USB] [USB]     [ETH]     ║
-     ║                                                             ║
-     ║ ○                                                        ○  ║
-     ╚═════════════════════════════════════════════════════════════╝
+                         GRABAR                         OIR
+                      +----------+                 +----------+
+                      | LED  BTN |                 | LED  BTN |
+                      +--+----+--+                 +--+----+--+
+                         |    |                       |    |
+            GPIO27 ------+    |                       |    +---GPIO22
+            (pin 13)          |                       |        (pin 15)
+            GPIO17 -----------+                       |
+            (pin 11)         GND ---------------------+--------GPIO23
+                             (pin 9)                  |        (pin 16)
+                                     |                |
+     =================================================+===============
+     pin ->  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 ...
+             |  |  |  |  |  |  |  |  *  |  *  |  *  |  *  *  |
+     +=======+==+==+==+==+==+==+==+==+==+==+==+==+==+==+==+==+======+
+     |                                                              |
+     |                         Raspberry Pi                         |
+     |                                                              |
+     |     [HDMI]                         [USB] [USB]     [ETH]     |
+     |                                                              |
+     |  o                                                         o |
+     +--------------------------------------------------------------+
 
-     ★ = pines usados
-     Switch: GPIO → botón → GND (active-low, pull-up interno)
-     LED:    GPIO → LED (+ ~330Ω si hace falta) → GND (alto = encendido)
+     * = pines usados
+     Botón: GPIO -- botón momentáneo -- GND (active-low, pull-up interno)
+     LED:    GPIO -- LED (+ ~330 ohm si hace falta) -- GND (alto = encendido)
 ```
 
 Variables opcionales en `.env`: `GPIO_RECORD_BUTTON`, `GPIO_RECORD_LED`, `GPIO_PLAY_BUTTON`, `GPIO_PLAY_LED`, `GPIO_CHIP` (default `gpiochip0`). `GPIO_LINE` sigue valiendo como alias del botón de grabar.
@@ -225,6 +225,8 @@ En la Raspberry Pi (botones GPIO + LEDs + `arecord` / `aplay`):
 npm start
 ```
 
+Sin pantalla ni teclado, en la Pi conviene el [arranque automático](#arranque-automático-raspberry-pi) en lugar de lanzar `npm start` a mano.
+
 En la Mac, durante el desarrollo (espacio para grabar, `p` para oír la última):
 
 ```bash
@@ -264,6 +266,30 @@ Para vaciar la carpeta `recordings/`:
 ```bash
 npm run clear:recordings
 ```
+
+### Arranque automático (Raspberry Pi)
+
+Para que la caja arranque sola al encender la Pi (sin teclado ni `npm start` manual):
+
+1. Completa el [setup](#setup), `.env` y `npm install` en la Pi.
+2. Instala y activa el servicio:
+
+```bash
+sudo ./scripts/install-boot-service.sh
+```
+
+El script genera `/etc/systemd/system/family-voice-message-box.service` desde `systemd/family-voice-message-box.service`, lo habilita y lo arranca. Usa el usuario que invocó `sudo`, el `node` del `PATH` y el directorio del repo.
+
+Comandos útiles:
+
+```bash
+systemctl status family-voice-message-box
+journalctl -u family-voice-message-box -f
+sudo systemctl stop family-voice-message-box
+sudo systemctl disable --now family-voice-message-box
+```
+
+El usuario del servicio debe pertenecer a los grupos `audio` y `gpio` (el script lo intenta con `usermod`). Si acabas de agregarlos, reinicia la sesión o la Pi.
 
 ------
 
