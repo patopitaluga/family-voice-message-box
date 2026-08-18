@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" role="img" aria-labelledby="title desc">
+  <title id="title">Cableado de los botones LED en la Raspberry Pi</title>
+  <desc id="desc">Botón grabar (GPIO17 + LED GPIO27) y botón oír (GPIO22 + LED GPIO23), con GND compartido.</desc>
+  <rect width="900" height="560" fill="#f7f7f5"/>
+
+  <rect x="28" y="36" width="200" height="420" rx="18" fill="#6cbe4a" stroke="#3d8a2a" stroke-width="3"/>
+  <text x="128" y="68" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#1a3d12">Raspberry Pi</text>
+  <text x="128" y="88" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#1a3d12">header 40 pines</text>
+
+  <rect x="188" y="108" width="78" height="320" rx="6" fill="#1e1e1e"/>
+
+  <g font-family="ui-monospace, Menlo, monospace" font-size="9" fill="#555">
+    <circle cx="212" cy="128" r="4" fill="#cfcfcf"/><text x="192" y="131" text-anchor="end">1</text>
+    <circle cx="242" cy="128" r="4" fill="#cfcfcf"/><text x="258" y="131">2</text>
+    <circle cx="212" cy="143" r="4" fill="#cfcfcf"/><text x="192" y="146" text-anchor="end">3</text>
+    <circle cx="242" cy="143" r="4" fill="#cfcfcf"/><text x="258" y="146">4</text>
+    <circle cx="212" cy="158" r="4" fill="#cfcfcf"/><text x="192" y="161" text-anchor="end">5</text>
+    <circle cx="242" cy="158" r="4" fill="#cfcfcf"/><text x="258" y="161">6</text>
+    <circle cx="212" cy="173" r="4" fill="#cfcfcf"/><text x="192" y="176" text-anchor="end">7</text>
+    <circle cx="242" cy="173" r="4" fill="#cfcfcf"/><text x="258" y="176">8</text>
+
+    <circle cx="212" cy="188" r="6" fill="#222"/><text x="192" y="191" text-anchor="end" font-weight="700" fill="#111">9</text>
+    <circle cx="242" cy="188" r="4" fill="#cfcfcf"/><text x="258" y="191">10</text>
+
+    <circle cx="212" cy="203" r="6" fill="#2f9e44" stroke="#1b6b2a" stroke-width="1.5"/><text x="192" y="206" text-anchor="end" font-weight="700" fill="#1b6b2a">11</text>
+    <circle cx="242" cy="203" r="4" fill="#cfcfcf"/><text x="258" y="206">12</text>
+
+    <circle cx="212" cy="218" r="6" fill="#f08c00" stroke="#a35b00" stroke-width="1.5"/><text x="192" y="221" text-anchor="end" font-weight="700" fill="#a35b00">13</text>
+    <circle cx="242" cy="218" r="4" fill="#cfcfcf"/><text x="258" y="221">14</text>
+
+    <circle cx="212" cy="233" r="6" fill="#4c6ef5" stroke="#364fc7" stroke-width="1.5"/><text x="192" y="236" text-anchor="end" font-weight="700" fill="#364fc7">15</text>
+    <circle cx="242" cy="233" r="6" fill="#ae3ec9" stroke="#862e9c" stroke-width="1.5"/><text x="258" y="236" font-weight="700" fill="#862e9c">16</text>
+
+    <circle cx="212" cy="248" r="4" fill="#cfcfcf"/><text x="192" y="251" text-anchor="end">17</text>
+    <circle cx="242" cy="248" r="4" fill="#cfcfcf"/><text x="258" y="251">18</text>
+    <circle cx="212" cy="263" r="4" fill="#cfcfcf"/><text x="192" y="266" text-anchor="end">19</text>
+    <circle cx="242" cy="263" r="4" fill="#cfcfcf"/><text x="258" y="266">20</text>
+    <circle cx="212" cy="278" r="4" fill="#cfcfcf"/><text x="192" y="281" text-anchor="end">21</text>
+    <circle cx="242" cy="278" r="4" fill="#cfcfcf"/><text x="258" y="281">22</text>
+    <circle cx="212" cy="293" r="4" fill="#cfcfcf"/><text x="192" y="296" text-anchor="end">23</text>
+    <circle cx="242" cy="293" r="4" fill="#cfcfcf"/><text x="258" y="296">24</text>
+    <circle cx="212" cy="308" r="4" fill="#cfcfcf"/><text x="192" y="311" text-anchor="end">25</text>
+    <circle cx="242" cy="308" r="4" fill="#cfcfcf"/><text x="258" y="311">26</text>
+    <circle cx="212" cy="323" r="4" fill="#cfcfcf"/><text x="192" y="326" text-anchor="end">27</text>
+    <circle cx="242" cy="323" r="4" fill="#cfcfcf"/><text x="258" y="326">28</text>
+    <circle cx="212" cy="338" r="4" fill="#cfcfcf"/><text x="192" y="341" text-anchor="end">29</text>
+    <circle cx="242" cy="323" r="0" fill="none"/>
+    <circle cx="242" cy="338" r="4" fill="#cfcfcf"/><text x="258" y="341">30</text>
+    <circle cx="212" cy="353" r="4" fill="#cfcfcf"/><text x="192" y="356" text-anchor="end">31</text>
+    <circle cx="242" cy="353" r="4" fill="#cfcfcf"/><text x="258" y="356">32</text>
+    <circle cx="212" cy="368" r="4" fill="#cfcfcf"/><text x="192" y="371" text-anchor="end">33</text>
+    <circle cx="242" cy="368" r="4" fill="#cfcfcf"/><text x="258" y="371">34</text>
+    <circle cx="212" cy="383" r="4" fill="#cfcfcf"/><text x="192" y="386" text-anchor="end">35</text>
+    <circle cx="242" cy="383" r="4" fill="#cfcfcf"/><text x="258" y="386">36</text>
+    <circle cx="212" cy="398" r="4" fill="#cfcfcf"/><text x="192" y="401" text-anchor="end">37</text>
+    <circle cx="242" cy="398" r="4" fill="#cfcfcf"/><text x="258" y="401">38</text>
+    <circle cx="212" cy="413" r="4" fill="#cfcfcf"/><text x="192" y="416" text-anchor="end">39</text>
+    <circle cx="242" cy="413" r="4" fill="#cfcfcf"/><text x="258" y="416">40</text>
+  </g>
+
+  <!-- Record button (top) -->
+  <path d="M218 203 C 320 203, 360 150, 430 140" fill="none" stroke="#2f9e44" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M218 218 C 320 218, 360 175, 430 170" fill="none" stroke="#f08c00" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M218 188 C 300 188, 340 210, 430 210" fill="none" stroke="#222" stroke-width="3.5" stroke-linecap="round"/>
+
+  <rect x="430" y="118" width="200" height="110" rx="12" fill="#fff" stroke="#333" stroke-width="2.5"/>
+  <text x="530" y="142" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#222">Botón GRABAR</text>
+  <text x="530" y="160" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#555">LED se enciende al pulsar</text>
+  <circle cx="490" cy="190" r="10" fill="#ffe066" stroke="#333" stroke-width="2"/>
+  <text x="490" y="212" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="10" fill="#666">LED</text>
+  <rect x="540" y="178" width="56" height="28" rx="6" fill="#eee" stroke="#333" stroke-width="2"/>
+  <text x="568" y="196" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="10" fill="#333">SW</text>
+
+  <text x="360" y="132" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#1b6b2a">GPIO17 pin 11 (SW)</text>
+  <text x="340" y="188" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#a35b00">GPIO27 pin 13 (LED)</text>
+  <text x="300" y="230" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#111">GND pin 9</text>
+
+  <!-- Play button (bottom) -->
+  <path d="M218 233 C 330 233, 380 300, 430 310" fill="none" stroke="#4c6ef5" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M248 233 C 340 250, 380 330, 430 340" fill="none" stroke="#ae3ec9" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M218 188 C 300 250, 360 360, 430 360" fill="none" stroke="#222" stroke-width="3" stroke-linecap="round" stroke-dasharray="6 4"/>
+
+  <rect x="430" y="290" width="200" height="110" rx="12" fill="#fff" stroke="#333" stroke-width="2.5"/>
+  <text x="530" y="314" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#222">Botón OÍR</text>
+  <text x="530" y="332" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#555">LED = audio nuevo pendiente</text>
+  <circle cx="490" cy="362" r="10" fill="#ffe066" stroke="#333" stroke-width="2"/>
+  <text x="490" y="384" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="10" fill="#666">LED</text>
+  <rect x="540" y="350" width="56" height="28" rx="6" fill="#eee" stroke="#333" stroke-width="2"/>
+  <text x="568" y="368" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="10" fill="#333">SW</text>
+
+  <text x="340" y="300" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#364fc7">GPIO22 pin 15 (SW)</text>
+  <text x="350" y="348" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#862e9c">GPIO23 pin 16 (LED)</text>
+
+  <text x="450" y="500" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#444">
+    SW: active-low a GND (pull-up interno). LED: GPIO ? LED (+ resistor si hace falta) ? GND.
+  </text>
+</svg>
