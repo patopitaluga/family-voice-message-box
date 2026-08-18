@@ -4,7 +4,7 @@ import type { HoldToTalkHandlers, StopListening } from './hold-to-talk.ts';
 /**
  * Used in `index.ts` for `npm start` on the Raspberry Pi.
  * Watches a GPIO line with `gpiomon` (from `gpiod`). Default: active-low button
- * (press = falling edge, release = rising edge).
+ * with internal pull-up (press = falling edge, release = rising edge).
  */
 export function listenToRaspberryButton(
   handlers: HoldToTalkHandlers,
@@ -22,7 +22,7 @@ export function listenToRaspberryButton(
   try {
     child = spawn(
       'gpiomon',
-      ['--format=%e', chip, String(line)],
+      ['--bias=pull-up', '--format=%e', chip, String(line)],
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
   } catch (error) {

@@ -7,6 +7,7 @@
 - [En este repositorio](#en-este-repositorio)
 - [Cómo empezar](#cómo-empezar)
   - [Setup](#setup)
+  - [Botón GPIO (Raspberry Pi)](#botón-gpio-raspberry-pi)
   - [Configuración](#configuración)
   - [Dependencias del proyecto](#dependencias-del-proyecto)
   - [Ejecutar](#ejecutar)
@@ -69,6 +70,32 @@ sudo apt install -y ffmpeg alsa-utils gpiod
 - `gpiod` — `gpiomon` para el botón GPIO  
 
 Instala Node 24.7+ (por ejemplo desde [NodeSource](https://github.com/nodesource/distributions) o el sitio oficial de Node).
+
+#### Botón GPIO (Raspberry Pi)
+
+El software espera un **botón momentáneo active-low** en la línea GPIO **17** (numeración BCM), chip `gpiochip0`. El programa activa el **pull-up interno** (`gpiomon --bias=pull-up`): al pulsar, la línea baja a GND (falling = grabar); al soltar, vuelve a alto (rising = enviar).
+
+**Conexión** (solo el botón; no hace falta resistencia externa):
+
+```text
+  Raspberry Pi (header 40 pines)
+  ================================
+
+   GPIO17 (pin 11, BCM 17) ----[ botón ]---- GND (pin 9)
+                            (momentáneo)
+```
+
+Vista esquemática:
+
+```text
+   GPIO17 (pull-up interno ON)
+      |
+      o  o-------- GND
+    botón
+  (pulsar = cierra)
+```
+
+El default es `GPIO_LINE=17`. Si usas otra línea BCM, ponla en `.env` (opcional: `GPIO_CHIP` si no es `gpiochip0`).
 
 #### macOS
 
