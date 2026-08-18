@@ -86,32 +86,37 @@ Hay **dos botones LED** (momentáneos, active-low, pull-up interno):
 - GND compartido: p. ej. **pin 9**.
 
 ```text
-                         GRABAR                         OIR
-                      +----------+                 +----------+
-                      | LED  BTN |                 | LED  BTN |
-                      +--+----+--+                 +--+----+--+
-                         |    |                       |    |
-            GPIO27 ------+    |                       |    +---GPIO22
-            (pin 13)          |                       |        (pin 15)
-            GPIO17 -----------+                       |
-            (pin 11)         GND ---------------------+--------GPIO23
-                             (pin 9)                  |        (pin 16)
-                                     |                |
-     =================================================+===============
-     pin ->  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 ...
-             |  |  |  |  |  |  |  |  *  |  *  |  *  |  *  *  |
-     +=======+==+==+==+==+==+==+==+==+==+==+==+==+==+==+==+==+======+
-     |                                                              |
-     |                         Raspberry Pi                         |
-     |                                                              |
-     |     [HDMI]                         [USB] [USB]     [ETH]     |
-     |                                                              |
-     |  o                                                         o |
-     +--------------------------------------------------------------+
+        GRABAR (3 cables)                    OIR (3 cables)
+      +-----------------+                +-----------------+
+      | LED   BTN   GND |                | LED   BTN   GND |
+      +--+-----+-----+--+                +--+-----+-----+--+
+         |     |     |                      |     |     |
+         |     |     +----------+-----------+     |     |
+         |     |                |                  |     |
+         |     |                |                  |     |
+      GPIO27  GPIO17           GND              GPIO23  GPIO22
+      pin 13  pin 11         pin 9             pin 16  pin 15
+                                    |
+     ===============================================================
+     pares  ->  2  4  6  8 10 12 14 16 18 20 22 24 26 28 30 32 34 36 38 40
+                |  |  |  |  |  |  |  *  |  |  |  |  |  |  |  |  |  |  |
+     impares->  1  3  5  7  9 11 13 15 17 19 21 23 25 27 29 31 33 35 37 39
+                |  |  |  |  *  *  *  *  |  |  |  |  |  |  |  |  |  |  |
+     +==========+==+==+==+==+==+==+==+==+==+==+==+==+==+==+==+==+==+==+==+
+     |                                                                    |
+     |                         Raspberry Pi                             |
+     |                                                                    |
+     |     [HDMI]                         [USB] [USB]     [ETH]         |
+     |                                                                    |
+     |  o                                                               o |
+     +--------------------------------------------------------------------+
 
-     * = pines usados
-     Botón: GPIO -- botón momentáneo -- GND (active-low, pull-up interno)
-     LED:    GPIO -- LED (+ ~330 ohm si hace falta) -- GND (alto = encendido)
+     Header de 40 pines (2 filas × 20). Fila de pares hacia el borde de la placa.
+     * = pines usados (5: GND pin 9 + GPIO 11, 13, 15, 16)
+     Por botón LED: 3 cables → GPIO del LED, GPIO del botón, GND
+     Botón: GPIO -- contacto momentáneo -- GND (active-low, pull-up interno)
+     LED:   GPIO -- LED (+ ~330 Ω si hace falta) -- GND (alto = encendido)
+     Si el módulo trae 4 pines (GND del LED y del botón separados), únelos al mismo GND.
 ```
 
 Variables opcionales en `.env`: `GPIO_RECORD_BUTTON`, `GPIO_RECORD_LED`, `GPIO_PLAY_BUTTON`, `GPIO_PLAY_LED`, `GPIO_CHIP` (default `gpiochip0`). `GPIO_LINE` sigue valiendo como alias del botón de grabar.
