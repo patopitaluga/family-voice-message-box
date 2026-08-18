@@ -16,9 +16,7 @@ export function listenToRaspberryButton(
   const chip = options?.chip ?? process.env.GPIO_CHIP ?? 'gpiochip0';
   const line = options?.line ?? Number(process.env.GPIO_LINE ?? '17');
 
-  if (!Number.isInteger(line) || line < 0) {
-    throw new Error(`Invalid GPIO_LINE: ${String(process.env.GPIO_LINE)}`);
-  }
+  if (!Number.isInteger(line) || line < 0) throw new Error(`Invalid GPIO_LINE: ${String(process.env.GPIO_LINE)}`);
 
   let child: ChildProcess;
   try {
@@ -50,30 +48,23 @@ export function listenToRaspberryButton(
   });
 
   child.once('exit', (code, signal) => {
-    if (code !== 0 && code !== null) {
-      console.error(
+    if (code !== 0 && code !== null) console.error(
         `gpiomon exited (code=${String(code)}, signal=${String(signal)}): ${stderr.trim()}`,
       );
-    }
+
   });
 
   child.stdout?.setEncoding('utf8');
   child.stdout?.on('data', (chunk: string) => {
     for (const rawLine of chunk.split('\n')) {
       const edge = rawLine.trim().toLowerCase();
-      if (edge === '') {
-        continue;
-      }
+      if (edge === '') continue;
 
       const pressed = edge === '0' || edge === 'falling';
       const released = edge === '1' || edge === 'rising';
-      if (!pressed && !released) {
-        continue;
-      }
+      if (!pressed && !released) continue;
 
-      if (busy) {
-        continue;
-      }
+      if (busy) continue;
 
       busy = true;
       const run = pressed ? handlers.onPress : handlers.onRelease;
@@ -84,8 +75,7 @@ export function listenToRaspberryButton(
   });
 
   return () => {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill('SIGTERM');
-    }
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+
   };
 }

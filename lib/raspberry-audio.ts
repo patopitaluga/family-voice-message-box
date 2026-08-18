@@ -1,5 +1,5 @@
 import type { ChildProcess } from 'node:child_process';
-import type { AudioDevice } from './audio-device.ts';
+import type { AudioControl } from './type-audio-control.ts';
 import {
   runAudioCommand,
   startAudioProcess,
@@ -7,18 +7,16 @@ import {
 } from './run-audio-command.ts';
 
 /**
- * Used in `create-audio-device.ts` for `npm start` on the Raspberry Pi.
+ * Used in `create-audio-control.ts` for `npm start` on the Raspberry Pi.
  */
-export function createRaspberryAudioDevice(): AudioDevice {
+export function createRaspberryAudioControl(): AudioControl {
   let recording: ChildProcess | undefined;
 
   return {
     name: 'raspberry (arecord / aplay)',
 
     async startRecording(outputPath: string): Promise<void> {
-      if (recording) {
-        throw new Error('Recording already in progress');
-      }
+      if (recording) throw new Error('Recording already in progress');
 
       recording = startAudioProcess('arecord', [
         '-f',
@@ -41,9 +39,7 @@ export function createRaspberryAudioDevice(): AudioDevice {
       const child = recording;
       recording = undefined;
 
-      if (!child) {
-        return;
-      }
+      if (!child) return;
 
       await stopAudioProcess(child);
     },

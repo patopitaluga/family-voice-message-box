@@ -1,8 +1,8 @@
 /**
- * Shared by `raspberry-audio.ts`, `mac-audio.ts`, `create-audio-device.ts`, and `index.ts`.
+ * Shared by `raspberry-audio.ts`, `mac-audio.ts`, `create-audio-control.ts`, and `index.ts`.
  * Grabación push-to-talk: `startRecording` / `stopRecording`; reproducción con `play`.
  */
-export type AudioDevice = {
+export type AudioControl = {
   readonly name: string;
   startRecording(outputPath: string): Promise<void>;
   stopRecording(): Promise<void>;

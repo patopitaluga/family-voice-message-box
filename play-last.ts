@@ -1,14 +1,18 @@
+/**
+ * CLI for `npm run play:last`: plays the newest WAV in `recordings/`
+ * using the Mac or Raspberry audio control for the current platform.
+ */
 import {
-  createAudioDevice,
-  resolveBoxMode,
-} from './audio/create-audio-device.ts';
-import { findLatestRecordingPath } from './audio/latest-recording.ts';
+  createAudioControl,
+  parsePlatform,
+} from './lib/create-audio-control.ts';
+import { getLatestRecordingPath } from './lib/get-latest-recording-path.ts';
 
-const mode = resolveBoxMode(
+const platform = parsePlatform(
   process.argv[2] ?? (process.platform === 'darwin' ? 'mac' : 'raspberry'),
 );
-const audio = createAudioDevice(mode);
-const latestPath = await findLatestRecordingPath();
+const audio = createAudioControl(platform);
+const latestPath = await getLatestRecordingPath();
 
 if (!latestPath) {
   console.error('No hay grabaciones en recordings/');

@@ -1,35 +1,32 @@
 import { mkdir, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  createAudioDevice,
-  resolveBoxMode,
-} from './audio/create-audio-device.ts';
-import { findLatestRecordingPath } from './audio/latest-recording.ts';
-import { convertWavToOggOpus } from './audio/wav-to-ogg-opus.ts';
-import { listenToMacSpacebar } from './input/mac-spacebar.ts';
-import { listenToRaspberryButton } from './input/raspberry-button.ts';
-import { assertRaspberryPiOs } from './platform/assert-raspberry-pi-os.ts';
+  createAudioControl,
+  parsePlatform,
+} from './lib/create-audio-control.ts';
+import { getLatestRecordingPath } from './lib/get-latest-recording-path.ts';
+import { convertWavToOggOpus } from './lib/wav-to-ogg-opus.ts';
+import { listenToMacSpacebar } from './lib/mac-spacebar.ts';
+import { listenToRaspberryButton } from './lib/raspberry-button.ts';
+import { isRaspberryPiOsHost } from './lib/is-raspberry-pi-os-host.ts';
 import { tgRequireFamilyGroup, tgSendVoice } from './send-audio-tg.ts';
 
 const telegramToken = process.env.TELEGRAM_TOKEN?.trim();
 const chatId = process.env.CHAT_ID?.trim();
 
-if (!telegramToken) {
-  throw new Error('TELEGRAM_TOKEN is not set');
-}
-if (!chatId) {
-  throw new Error('CHAT_ID is not set');
-}
+if (!telegramToken) throw new Error('TELEGRAM_TOKEN is not set');
+if (!chatId) throw new Error('CHAT_ID is not set');
 
 await tgRequireFamilyGroup(telegramToken, chatId);
 
-const mode = resolveBoxMode();
+const platform = parsePlatform();
 
-if (mode === 'raspberry') {
-  assertRaspberryPiOs();
+if (platform === 'raspberry' && !isRaspberryPiOsHost()) {
+  console.error('Este software está diseñado para correr en una Raspberry');
+  process.exit(1);
 }
 
-const audio = createAudioDevice(mode);
+const audio = createAudioControl(platform);
 
 await mkdir('recordings', { recursive: true });
 
@@ -39,9 +36,7 @@ let isRecording = false;
 
 const handlers = {
   async onPress() {
-    if (isRecording) {
-      return;
-    }
+    if (isRecording) return;
 
     currentRecordingPath = join(
       'recordings',
@@ -54,9 +49,7 @@ const handlers = {
   },
 
   async onRelease() {
-    if (!isRecording) {
-      return;
-    }
+    if (!isRecording) return;
 
     isRecording = false;
     await audio.stopRecording();
@@ -70,27 +63,21 @@ const handlers = {
       startedAt === undefined ? undefined : Date.now() - startedAt;
 
     let sizeLabel = 'tamaño desconocido';
-    if (path !== undefined) {
-      try {
+    if (path !== undefined) try {
         const { size } = await stat(path);
-        if (size < 1024) {
-          sizeLabel = `${String(size)} B`;
-        } else if (size < 1024 * 1024) {
-          sizeLabel = `${(size / 1024).toFixed(1)} KB`;
-        } else {
-          sizeLabel = `${(size / (1024 * 1024)).toFixed(2)} MB`;
-        }
+        if (size < 1024) sizeLabel = `${String(size)} B`;
+         else if (size < 1024 * 1024) sizeLabel = `${(size / 1024).toFixed(1)} KB`;
+         else sizeLabel = `${(size / (1024 * 1024)).toFixed(2)} MB`;
+
       } catch {
         sizeLabel = 'archivo no encontrado';
       }
-    }
 
     let durationLabel = 'duración desconocida';
     if (durationMs !== undefined) {
       const seconds = durationMs / 1000;
-      if (seconds < 60) {
-        durationLabel = `${seconds.toFixed(1)} s`;
-      } else {
+      if (seconds < 60) durationLabel = `${seconds.toFixed(1)} s`;
+       else {
         const minutes = Math.floor(seconds / 60);
         const remainder = seconds - minutes * 60;
         durationLabel = `${String(minutes)} m ${remainder.toFixed(1)} s`;
@@ -112,19 +99,16 @@ const handlers = {
       } catch (error: unknown) {
         console.error('No se pudo enviar a Telegram:', error);
       } finally {
-        if (oggPath !== undefined) {
-          await unlink(oggPath).catch(() => undefined);
-        }
+        if (oggPath !== undefined) await unlink(oggPath).catch(() => undefined);
+
       }
     }
   },
 
   async onPlayLast() {
-    if (isRecording) {
-      return;
-    }
+    if (isRecording) return;
 
-    const latestPath = await findLatestRecordingPath();
+    const latestPath = await getLatestRecordingPath();
     if (!latestPath) {
       console.log('No hay grabaciones para reproducir.');
       return;
@@ -136,7 +120,7 @@ const handlers = {
 };
 
 const stopListening =
-  mode === 'mac'
+  platform === 'mac'
     ? await listenToMacSpacebar(handlers)
     : listenToRaspberryButton(handlers);
 
@@ -150,15 +134,12 @@ process.on('SIGTERM', shutdown);
 
 console.log(`Family Voice Message Box — ${audio.name}`);
 
-if (mode === 'mac') {
-  console.log(
+if (platform === 'mac') console.log(
     'Mantén pulsado espacio para grabar. Pulsa p para oír la última. Ctrl+C para salir.',
   );
-} else {
-  console.log(
+ else console.log(
     `Esperando el botón (GPIO ${process.env.GPIO_LINE ?? '17'}). Ctrl+C para salir.`,
   );
-}
 
 await new Promise(() => {
   // Stay running until SIGINT / SIGTERM.

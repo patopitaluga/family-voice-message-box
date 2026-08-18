@@ -13,6 +13,10 @@ export default tseslint.config(
     },
     rules: {
       '@stylistic/semi': ['error', 'always'],
+      // Single-statement if/else/for/while: no braces, body on the same line.
+      // Keep braces only for multi-statement bodies (see .cursor/rules/brace-style.mdc).
+      curly: ['error', 'multi'],
+      '@stylistic/nonblock-statement-body-position': ['error', 'beside'],
     },
   },
   {

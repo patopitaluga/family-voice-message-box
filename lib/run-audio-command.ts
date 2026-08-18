@@ -23,15 +23,12 @@ export function startAudioProcess(
  * Sends `q` when stdin is available (ffmpeg), otherwise SIGINT (`arecord`).
  */
 export async function stopAudioProcess(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
+  if (child.exitCode !== null || child.signalCode !== null) return;
 
   await new Promise<void>((resolve, reject) => {
     const forceKill = setTimeout(() => {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill('SIGKILL');
-      }
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+
     }, 3000);
 
     child.once('error', (error) => {
@@ -48,9 +45,8 @@ export async function stopAudioProcess(child: ChildProcess): Promise<void> {
       child.stdin.end();
 
       setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill('SIGINT');
-        }
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGINT');
+
       }, 800);
       return;
     }

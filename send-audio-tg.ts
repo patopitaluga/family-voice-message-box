@@ -33,11 +33,9 @@ export async function tgGetMe(token: string): Promise<TgBotIdentity> {
     };
   };
 
-  if (!data.ok || data.result === undefined) {
-    throw new Error(
+  if (!data.ok || data.result === undefined) throw new Error(
       data.description ?? `Telegram getMe failed (${String(response.status)})`,
     );
-  }
 
   return {
     id: data.result.id,
@@ -67,11 +65,9 @@ export async function tgGetChat(
     };
   };
 
-  if (!data.ok || data.result === undefined) {
-    throw new Error(
+  if (!data.ok || data.result === undefined) throw new Error(
       data.description ?? `Telegram getChat failed (${String(response.status)})`,
     );
-  }
 
   return {
     id: data.result.id,
@@ -90,9 +86,7 @@ export async function tgRequireFamilyGroup(
 ): Promise<TgChat> {
   const chat = await tgGetChat(token, chatId);
 
-  if (chat.type === 'group' || chat.type === 'supergroup') {
-    return chat;
-  }
+  if (chat.type === 'group' || chat.type === 'supergroup') return chat;
 
   const kind =
     chat.type === 'private'
@@ -141,22 +135,17 @@ export async function tgFindRecentFamilyGroups(
     }>;
   };
 
-  if (!data.ok || data.result === undefined) {
-    throw new Error(
+  if (!data.ok || data.result === undefined) throw new Error(
       data.description ?? `Telegram getUpdates failed (${String(response.status)})`,
     );
-  }
 
   const byId = new Map<number, TgChat>();
 
   for (const update of data.result) {
     const chat = update.message?.chat ?? update.my_chat_member?.chat;
-    if (chat === undefined) {
-      continue;
-    }
-    if (chat.type !== 'group' && chat.type !== 'supergroup') {
-      continue;
-    }
+    if (chat === undefined) continue;
+
+    if (chat.type !== 'group' && chat.type !== 'supergroup') continue;
 
     byId.set(chat.id, {
       id: chat.id,
@@ -182,11 +171,10 @@ export async function tgSendMessage(
   );
   const data = (await response.json()) as { ok: boolean; description?: string };
 
-  if (!data.ok) {
-    throw new Error(
+  if (!data.ok) throw new Error(
       data.description ?? `Telegram sendMessage failed (${String(response.status)})`,
     );
-  }
+
 }
 
 /**
@@ -215,9 +203,8 @@ export async function tgSendVoice(
     description?: string;
   };
 
-  if (!data.ok) {
-    throw new Error(
+  if (!data.ok) throw new Error(
       data.description ?? `Telegram sendVoice failed (${String(response.status)})`,
     );
-  }
+
 }

@@ -2,9 +2,7 @@ import { tgFindRecentFamilyGroups, tgGetMe } from './send-audio-tg.ts';
 
 const telegramToken = process.env.TELEGRAM_TOKEN?.trim();
 
-if (!telegramToken) {
-  throw new Error('TELEGRAM_TOKEN is not set');
-}
+if (!telegramToken) throw new Error('TELEGRAM_TOKEN is not set');
 
 const bot = await tgGetMe(telegramToken);
 const botHandle =

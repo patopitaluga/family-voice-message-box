@@ -11,21 +11,21 @@ Always end TypeScript statements with a semicolon. This matches `@stylistic/semi
 ```typescript
 // Good
 import { join } from 'node:path';
-const mode = resolveBoxMode();
-return createMacAudioDevice();
+const platform = parsePlatform();
+return createMacAudioControl();
 
 // Bad
 import { join } from 'node:path'
-const mode = resolveBoxMode()
-return createMacAudioDevice()
+const platform = parsePlatform()
+return createMacAudioControl()
 ```
 
 Also use semicolons between members in type/interface bodies:
 
 ```typescript
-export type BoxMode = 'raspberry' | 'mac';
+export type Platform = 'raspberry' | 'mac';
 
-export type AudioDevice = {
+export type AudioControl = {
   readonly name: string;
   play(filePath: string): Promise<void>;
 };

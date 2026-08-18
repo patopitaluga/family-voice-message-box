@@ -45,9 +45,7 @@ export async function listenToMacSpacebar(
 
   const listener = (event: { name?: string; state: 'DOWN' | 'UP' }): void => {
     if (event.name === 'P' && event.state === 'DOWN') {
-      if (held || pressInFlight || playInFlight || !handlers.onPlayLast) {
-        return;
-      }
+      if (held || pressInFlight || playInFlight || !handlers.onPlayLast) return;
 
       playInFlight = true;
       void Promise.resolve(handlers.onPlayLast())
@@ -60,14 +58,10 @@ export async function listenToMacSpacebar(
       return;
     }
 
-    if (event.name !== 'SPACE') {
-      return;
-    }
+    if (event.name !== 'SPACE') return;
 
     if (event.state === 'DOWN') {
-      if (held || playInFlight) {
-        return;
-      }
+      if (held || playInFlight) return;
 
       held = true;
       pressInFlight = true;
@@ -91,9 +85,7 @@ export async function listenToMacSpacebar(
     }
 
     if (event.state === 'UP') {
-      if (!held) {
-        return;
-      }
+      if (!held) return;
 
       if (pressInFlight) {
         releaseWhilePressInFlight = true;
@@ -133,9 +125,8 @@ export async function listenToMacSpacebar(
     keyboard.removeListener(listener);
     keyboard.kill();
 
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(false);
-    }
+    if (process.stdin.isTTY) process.stdin.setRawMode(false);
+
   };
 
   return stop;

@@ -1,5 +1,5 @@
 import type { ChildProcess } from 'node:child_process';
-import type { AudioDevice } from './audio-device.ts';
+import type { AudioControl } from './type-audio-control.ts';
 import {
   runAudioCommand,
   startAudioProcess,
@@ -7,10 +7,10 @@ import {
 } from './run-audio-command.ts';
 
 /**
- * Used in `create-audio-device.ts` for `npm run start:dev` on macOS.
+ * Used in `create-audio-control.ts` for `npm run start:dev` on macOS.
  * Records with ffmpeg (AVFoundation) and plays back with macOS `afplay`.
  */
-export function createMacAudioDevice(): AudioDevice {
+export function createMacAudioControl(): AudioControl {
   let recording: ChildProcess | undefined;
   let recordingStderr = '';
 
@@ -18,9 +18,7 @@ export function createMacAudioDevice(): AudioDevice {
     name: 'mac (ffmpeg / afplay)',
 
     async startRecording(outputPath: string): Promise<void> {
-      if (recording) {
-        throw new Error('Recording already in progress');
-      }
+      if (recording) throw new Error('Recording already in progress');
 
       recordingStderr = '';
       const child = startAudioProcess(
@@ -51,9 +49,7 @@ export function createMacAudioDevice(): AudioDevice {
       recording = child;
 
       child.once('exit', (code, signal) => {
-        if (recording === child) {
-          recording = undefined;
-        }
+        if (recording === child) recording = undefined;
 
         if (code !== 0 && code !== null && signal === null) {
           const details = recordingStderr.trim();
@@ -105,9 +101,7 @@ export function createMacAudioDevice(): AudioDevice {
       const child = recording;
       recording = undefined;
 
-      if (!child) {
-        return;
-      }
+      if (!child) return;
 
       await stopAudioProcess(child);
     },
