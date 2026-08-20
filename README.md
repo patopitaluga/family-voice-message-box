@@ -70,6 +70,8 @@ sudo apt install -y ffmpeg alsa-utils gpiod
 - `alsa-utils` — `arecord` / `aplay`  
 - `gpiod` — `gpiomon` / `gpioset` para botones y LEDs GPIO  
 
+El usuario tiene que estar en el grupo `audio` (`sudo usermod -aG audio $USER` y reiniciar sesión). Comprueba captura con `arecord -l`. Si el micrófono no es la tarjeta 0, pon `ALSA_DEVICE=plughw:1,0` (o el número que muestre `arecord -l`) en `.env`.  
+
 **No uses `apt install nodejs`.** En Raspberry Pi OS eso instala Node 20 (Debian 13 / Trixie) o 18 (Debian 12 / Bookworm). Node 20 no puede ejecutar archivos `.ts`: el stripping de tipos llegó en Node 22.6 (con flag) y es estable sin flag recién en 22.18+ / 24.
 
 Instala Node 24 desde [NodeSource](https://github.com/nodesource/distributions):

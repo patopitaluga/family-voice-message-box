@@ -13,6 +13,7 @@ import type { StopListening } from './lib/hold-to-talk.ts';
 import { combineLeds } from './lib/combine-leds.ts';
 import { createConsoleLedPair } from './lib/create-console-led-pair.ts';
 import { createRaspberryGpioLed } from './lib/raspberry-gpio-led.ts';
+import { warnIfNoAlsaCaptureDevice } from './lib/raspberry-audio.ts';
 import { isRaspberryPiOsHost } from './lib/is-raspberry-pi-os-host.ts';
 import { listenToFamilyGroupVoices } from './lib/listen-family-group-voices.ts';
 import { ensureTempDir, tempPath } from './lib/temp-dir.ts';
@@ -41,6 +42,8 @@ if (platform === 'raspberry' && !isRaspberryPiOsHost()) {
 const audio = createAudioControl(platform);
 
 await ensureTempDir();
+
+if (platform === 'raspberry') await warnIfNoAlsaCaptureDevice();
 
 const gpioChip = process.env.GPIO_CHIP ?? 'gpiochip0';
 const recordLedLine = Number(process.env.GPIO_RECORD_LED ?? '27');
@@ -75,7 +78,13 @@ const handlers = {
     currentRecordingPath = tempPath(`out-${String(Date.now())}.wav`);
     console.log('Grabando…');
     recordLed.set(true);
-    await audio.startRecording(currentRecordingPath);
+    try {
+      await audio.startRecording(currentRecordingPath);
+    } catch (error: unknown) {
+      recordLed.set(false);
+      currentRecordingPath = undefined;
+      throw error;
+    }
     recordingStartedAt = Date.now();
     isRecording = true;
   },
@@ -95,9 +104,11 @@ const handlers = {
     const durationMs =
       startedAt === undefined ? undefined : Date.now() - startedAt;
 
+    let wavExists = false;
     let sizeLabel = 'tamaño desconocido';
     if (wavPath !== undefined) try {
         const { size } = await stat(wavPath);
+        wavExists = true;
         if (size < 1024) sizeLabel = `${String(size)} B`;
          else if (size < 1024 * 1024) sizeLabel = `${(size / 1024).toFixed(1)} KB`;
          else sizeLabel = `${(size / (1024 * 1024)).toFixed(2)} MB`;
@@ -122,6 +133,13 @@ const handlers = {
     );
 
     if (wavPath === undefined) return;
+    if (!wavExists) {
+      console.error(
+        'arecord no escribió el WAV. En la Pi: arecord -l  (tiene que haber un dispositivo de captura). ' +
+          'Grupo audio: sudo usermod -aG audio $USER. Opcional: ALSA_DEVICE=plughw:1,0 en .env',
+      );
+      return;
+    }
 
     let oggPath: string | undefined;
     try {

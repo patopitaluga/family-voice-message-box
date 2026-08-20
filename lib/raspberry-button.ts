@@ -80,9 +80,13 @@ function watchActiveLowButton(
       if (busy) continue;
 
       busy = true;
-      void Promise.resolve(run()).finally(() => {
-        busy = false;
-      });
+      void Promise.resolve(run())
+        .catch((error: unknown) => {
+          console.error(error);
+        })
+        .finally(() => {
+          busy = false;
+        });
     }
   });
 
