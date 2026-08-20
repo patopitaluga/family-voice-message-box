@@ -4,6 +4,7 @@
  * Used from `index.ts` for `npm start`.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { gpiomonWatchArgs } from './gpiod-cli.ts';
 import type { HoldToTalkHandlers, StopListening } from './hold-to-talk.ts';
 
 /** Used in `listenToRaspberryButtons`. */
@@ -32,11 +33,9 @@ function watchActiveLowButton(
 
   let child: ChildProcess;
   try {
-    child = spawn(
-      'gpiomon',
-      ['--bias=pull-up', '--format=%e', chip, String(line)],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
-    );
+    child = spawn('gpiomon', gpiomonWatchArgs(chip, line), {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
   } catch (error) {
     throw new Error(
       `Could not start gpiomon for ${chip} line ${String(line)}. Is gpiod installed?`,
@@ -72,7 +71,7 @@ function watchActiveLowButton(
       const edge = rawLine.trim().toLowerCase();
       if (edge === '') continue;
 
-      const pressed = edge === '0' || edge === 'falling';
+      const pressed = edge === '0' || edge === '2' || edge === 'falling';
       const released = edge === '1' || edge === 'rising';
       if (!pressed && !released) continue;
 

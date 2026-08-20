@@ -3,6 +3,7 @@
  * Used from `index.ts` (via `combineLeds`) for the record and play illuminated buttons.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { gpiosetHoldArgs } from './gpiod-cli.ts';
 import type { Led } from './type-led.ts';
 
 /**
@@ -23,11 +24,9 @@ export function createRaspberryGpioLed(chip: string, line: number): Led {
   return {
     set(on: boolean): void {
       stop();
-      child = spawn(
-        'gpioset',
-        ['--mode=signal', chip, `${String(line)}=${on ? '1' : '0'}`],
-        { stdio: ['ignore', 'ignore', 'pipe'] },
-      );
+      child = spawn('gpioset', gpiosetHoldArgs(chip, line, on), {
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
       child.once('error', (error) => {
         console.error(
           `gpioset failed for ${chip} line ${String(line)}. Is gpiod installed?`,

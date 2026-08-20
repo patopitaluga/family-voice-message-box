@@ -7,6 +7,8 @@ import { convertOggOpusToWav } from './lib/ogg-opus-to-wav.ts';
 import { convertWavToOggOpus } from './lib/wav-to-ogg-opus.ts';
 import { listenToMacSpacebar } from './lib/mac-spacebar.ts';
 import { listenToRaspberryButtons } from './lib/raspberry-button.ts';
+import { listenToTerminalKeys } from './lib/terminal-keys.ts';
+import type { StopListening } from './lib/hold-to-talk.ts';
 import { combineLeds } from './lib/combine-leds.ts';
 import { createConsoleLedPair } from './lib/create-console-led-pair.ts';
 import { createRaspberryGpioLed } from './lib/raspberry-gpio-led.ts';
@@ -165,10 +167,16 @@ const handlers = {
   },
 };
 
-const stopButtons =
-  platform === 'mac'
-    ? await listenToMacSpacebar(handlers)
-    : listenToRaspberryButtons(handlers);
+let stopButtons: StopListening;
+if (platform === 'mac') stopButtons = await listenToMacSpacebar(handlers);
+ else {
+  const stopGpio = listenToRaspberryButtons(handlers);
+  const stopKeys = listenToTerminalKeys(handlers);
+  stopButtons = () => {
+    stopGpio();
+    stopKeys();
+  };
+}
 
 const stopTelegram = listenToFamilyGroupVoices({
   token: telegramToken,
@@ -203,6 +211,9 @@ if (platform === 'mac') console.log(
  else console.log(
     `Botón grabar: GPIO ${process.env.GPIO_RECORD_BUTTON ?? process.env.GPIO_LINE ?? '17'} (LED ${String(recordLedLine)}). ` +
       `Botón oír: GPIO ${process.env.GPIO_PLAY_BUTTON ?? '22'} (LED ${String(playLedLine)}). ` +
+      (process.stdin.isTTY
+        ? 'Sin botones: pulsa espacio para grabar, espacio otra vez para enviar, p para oír. '
+        : '') +
       'LEDs también en consola (●/○). Ctrl+C para salir.',
   );
 

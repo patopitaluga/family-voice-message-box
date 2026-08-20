@@ -240,6 +240,8 @@ En la Raspberry Pi (botones GPIO + LEDs + `arecord` / `aplay`):
 npm start
 ```
 
+Si estás en una terminal (SSH) y todavía no cableaste los botones, el mismo `npm start` acepta teclado: **espacio** inicia la grabación, **espacio** otra vez envía, **p** oye. (Un terminal no tiene key-up, así que no es “mantener pulsado” como en Mac.) El servicio systemd no tiene TTY: ahí solo cuentan los botones GPIO.
+
 Sin pantalla ni teclado, en la Pi conviene el [arranque automático](#arranque-automático-raspberry-pi) en lugar de lanzar `npm start` a mano.
 
 En la Mac, durante el desarrollo (espacio para grabar, `p` para oír audios del grupo). Los LEDs de grabar/oír se reflejan en consola (`●`/`○`) con la misma lógica que en la Pi:
