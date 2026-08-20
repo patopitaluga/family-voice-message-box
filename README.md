@@ -70,7 +70,17 @@ sudo apt install -y ffmpeg alsa-utils gpiod
 - `alsa-utils` — `arecord` / `aplay`  
 - `gpiod` — `gpiomon` / `gpioset` para botones y LEDs GPIO  
 
-Instala Node 24.7+ (por ejemplo desde [NodeSource](https://github.com/nodesource/distributions) o el sitio oficial de Node).
+**No uses `apt install nodejs`.** En Raspberry Pi OS eso instala Node 20 (Debian 13 / Trixie) o 18 (Debian 12 / Bookworm). Node 20 no puede ejecutar archivos `.ts`: el stripping de tipos llegó en Node 22.6 (con flag) y es estable sin flag recién en 22.18+ / 24.
+
+Instala Node 24 desde [NodeSource](https://github.com/nodesource/distributions):
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+sudo apt install -y nodejs
+node -v   # tiene que ser v24.x
+```
+
+Si ya tenías el `nodejs` de apt, este paso lo reemplaza.
 
 #### Botones GPIO (Raspberry Pi)
 
