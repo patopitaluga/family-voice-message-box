@@ -1,6 +1,22 @@
 /**
  * Terminal stand-in for GPIO buttons when `npm start` runs in a TTY (SSH).
  * Used from `index.ts` on Raspberry Pi so you can test without wiring buttons.
+ *
+ * Hold-to-talk vs a TTY (why the timers exist)
+ * --------------------------------------------
+ * GPIO buttons (`gpiomon`) report press and release as falling/rising edges.
+ * A terminal does not: stdin is a stream of characters, with no key-up.
+ *
+ * Holding space is not one event. The OS waits ~500ms ("delay until repeat")
+ * then emits more ` ` bytes. This code infers "still held" from that stream:
+ * another space soon → still down; a gap → treat as release. That is a hold
+ * detector, not switch debouncing (debouncing ignores extra electrical edges
+ * from one physical click).
+ *
+ * `FIRST_REPEAT_GRACE_MS` must exceed that initial delay, or the first repeat
+ * looks like a new press and recording stops at ~0.5s. After repeats are
+ * systemd has no TTY; this path does not run there. `index.ts` only uses this
+ * when `listenToLinuxKeyboard` cannot open an evdev device.
  */
 import type { HoldToTalkHandlers, StopListening } from './hold-to-talk.ts';
 
@@ -8,13 +24,15 @@ const CTRL_C = 3;
 const SPACE = 32;
 const KEY_P = 80;
 const KEY_P_LOWER = 112;
-/** Ignore key-repeat; a gap means the key was released. */
-const REPEAT_GUARD_MS = 400;
+/** See file comment: wait out OS "delay until repeat" before assuming release. */
+const FIRST_REPEAT_GRACE_MS = 1500;
+/** See file comment: gap between key-repeat spaces once the key is clearly held. */
+const HELD_RELEASE_MS = 80;
 
 /**
  * Used in `index.ts` for `npm start` on Raspberry Pi.
- * Space toggles record/send (a terminal has no key-up, unlike Mac hold-to-talk).
- * `p` plays. No-op when stdin is not a TTY (systemd).
+ * Hold space to record; `p` plays. No-op when stdin is not a TTY (systemd).
+ * Why space uses timers: see the file comment (TTY has no key-up).
  */
 export function listenToTerminalKeys(
   handlers: HoldToTalkHandlers,
@@ -24,20 +42,38 @@ export function listenToTerminalKeys(
   process.stdin.setRawMode(true);
   process.stdin.resume();
 
-  let recording = false;
-  let ignoringRepeat = false;
-  let quietTimer: ReturnType<typeof setTimeout> | undefined;
+  let held = false;
+  let releaseTimer: ReturnType<typeof setTimeout> | undefined;
   let pressInFlight = false;
-  let releaseInFlight = false;
+  let releaseWhilePressInFlight = false;
   let playInFlight = false;
 
-  const markRepeat = (): void => {
-    ignoringRepeat = true;
-    if (quietTimer !== undefined) clearTimeout(quietTimer);
-    quietTimer = setTimeout(() => {
-      ignoringRepeat = false;
-      quietTimer = undefined;
-    }, REPEAT_GUARD_MS);
+  const clearReleaseTimer = (): void => {
+    if (releaseTimer === undefined) return;
+    clearTimeout(releaseTimer);
+    releaseTimer = undefined;
+  };
+
+  const finishRelease = (): void => {
+    held = false;
+    void Promise.resolve(handlers.onRelease()).catch((error: unknown) => {
+      console.error(error);
+    });
+  };
+
+  const armRelease = (ms: number): void => {
+    clearReleaseTimer();
+    releaseTimer = setTimeout(() => {
+      releaseTimer = undefined;
+      if (!held) return;
+
+      if (pressInFlight) {
+        releaseWhilePressInFlight = true;
+        return;
+      }
+
+      finishRelease();
+    }, ms);
   };
 
   const onData = (chunk: Buffer): void => {
@@ -48,7 +84,7 @@ export function listenToTerminalKeys(
       }
 
       if (byte === KEY_P || byte === KEY_P_LOWER) {
-        if (recording || pressInFlight || playInFlight || handlers.onPlayLast === undefined) continue;
+        if (held || pressInFlight || playInFlight || handlers.onPlayLast === undefined) continue;
 
         playInFlight = true;
         void Promise.resolve(handlers.onPlayLast())
@@ -62,37 +98,27 @@ export function listenToTerminalKeys(
       }
 
       if (byte !== SPACE) continue;
-      if (ignoringRepeat) {
-        markRepeat();
-        continue;
-      }
+      if (playInFlight) continue;
 
-      if (pressInFlight || releaseInFlight || playInFlight) continue;
-
-      markRepeat();
-
-      if (!recording) {
-        recording = true;
+      if (!held) {
+        held = true;
         pressInFlight = true;
+        armRelease(FIRST_REPEAT_GRACE_MS);
         void Promise.resolve(handlers.onPress())
           .catch((error: unknown) => {
             console.error(error);
           })
           .finally(() => {
             pressInFlight = false;
+            if (releaseWhilePressInFlight) {
+              releaseWhilePressInFlight = false;
+              finishRelease();
+            }
           });
         continue;
       }
 
-      recording = false;
-      releaseInFlight = true;
-      void Promise.resolve(handlers.onRelease())
-        .catch((error: unknown) => {
-          console.error(error);
-        })
-        .finally(() => {
-          releaseInFlight = false;
-        });
+      armRelease(HELD_RELEASE_MS);
     }
   };
 
@@ -100,7 +126,7 @@ export function listenToTerminalKeys(
 
   return () => {
     process.stdin.off('data', onData);
-    if (quietTimer !== undefined) clearTimeout(quietTimer);
+    clearReleaseTimer();
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
   };
 }

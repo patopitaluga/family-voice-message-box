@@ -240,7 +240,13 @@ En la Raspberry Pi (botones GPIO + LEDs + `arecord` / `aplay`):
 npm start
 ```
 
-Si estás en una terminal (SSH) y todavía no cableaste los botones, el mismo `npm start` acepta teclado: **espacio** inicia la grabación, **espacio** otra vez envía, **p** oye. (Un terminal no tiene key-up, así que no es “mantener pulsado” como en Mac.) El servicio systemd no tiene TTY: ahí solo cuentan los botones GPIO.
+Si estás en la Pi y todavía no cableaste los botones, enchufa un **teclado USB** (no el de SSH): `npm start` usa evdev (`input-event`) con **espacio** (mantener) y **p** (oír). El usuario debe estar en el grupo `input`:
+
+```bash
+sudo usermod -aG input $USER
+```
+
+Cierra sesión o reinicia después. Si no hay dispositivo `*-event-kbd`, cae al teclado de la terminal SSH (sin key-up real). El servicio systemd no usa teclado: ahí solo cuentan los botones GPIO.
 
 Sin pantalla ni teclado, en la Pi conviene el [arranque automático](#arranque-automático-raspberry-pi) en lugar de lanzar `npm start` a mano.
 

@@ -16,6 +16,7 @@
   },
   "private": true,
   "dependencies": {
+    "input-event": "^1.2.6",
     "node-global-key-listener": "^0.3.0"
   },
   "devDependencies": {

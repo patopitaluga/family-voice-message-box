@@ -7,6 +7,7 @@ import { convertOggOpusToWav } from './lib/ogg-opus-to-wav.ts';
 import { convertWavToOggOpus } from './lib/wav-to-ogg-opus.ts';
 import { listenToMacSpacebar } from './lib/mac-spacebar.ts';
 import { listenToRaspberryButtons } from './lib/raspberry-button.ts';
+import { listenToLinuxKeyboard } from './lib/linux-keyboard.ts';
 import { listenToTerminalKeys } from './lib/terminal-keys.ts';
 import type { StopListening } from './lib/hold-to-talk.ts';
 import { combineLeds } from './lib/combine-leds.ts';
@@ -168,10 +169,18 @@ const handlers = {
 };
 
 let stopButtons: StopListening;
+let raspberryKeyHint = '';
 if (platform === 'mac') stopButtons = await listenToMacSpacebar(handlers);
  else {
   const stopGpio = listenToRaspberryButtons(handlers);
-  const stopKeys = listenToTerminalKeys(handlers);
+  const stopEvdev = await listenToLinuxKeyboard(handlers);
+  const stopKeys = stopEvdev ?? listenToTerminalKeys(handlers);
+  raspberryKeyHint =
+    stopEvdev !== undefined
+      ? 'Teclado USB (evdev): mantén espacio para grabar, p para oír. '
+      : process.stdin.isTTY
+        ? 'Sin teclado evdev: espacio en esta terminal, p para oír. '
+        : '';
   stopButtons = () => {
     stopGpio();
     stopKeys();
@@ -211,9 +220,7 @@ if (platform === 'mac') console.log(
  else console.log(
     `Botón grabar: GPIO ${process.env.GPIO_RECORD_BUTTON ?? process.env.GPIO_LINE ?? '17'} (LED ${String(recordLedLine)}). ` +
       `Botón oír: GPIO ${process.env.GPIO_PLAY_BUTTON ?? '22'} (LED ${String(playLedLine)}). ` +
-      (process.stdin.isTTY
-        ? 'Sin botones: pulsa espacio para grabar, espacio otra vez para enviar, p para oír. '
-        : '') +
+      raspberryKeyHint +
       'LEDs también en consola (●/○). Ctrl+C para salir.',
   );
 
