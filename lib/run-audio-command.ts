@@ -56,13 +56,18 @@ export async function stopAudioProcess(child: ChildProcess): Promise<void> {
 }
 
 /**
- * Used in `raspberry-audio.ts` and `mac-audio.ts` for one-shot playback.
+ * Used in `raspberry-audio.ts`, `mac-audio.ts`, `wav-to-ogg-opus.ts`, and `ogg-opus-to-wav.ts`.
  */
 export async function runAudioCommand(
   command: string,
   args: string[],
 ): Promise<void> {
   const child = startAudioProcess(command, args);
+  let stderr = '';
+  child.stderr?.setEncoding('utf8');
+  child.stderr?.on('data', (chunk: string) => {
+    stderr += chunk;
+  });
 
   await new Promise<void>((resolve, reject) => {
     child.once('error', reject);
@@ -72,9 +77,12 @@ export async function runAudioCommand(
         return;
       }
 
+      const details = stderr.trim();
       reject(
         new Error(
-          `${command} failed (code=${String(code)}, signal=${String(signal)})`,
+          details.length > 0
+            ? `${command} failed (code=${String(code)}, signal=${String(signal)}): ${details}`
+            : `${command} failed (code=${String(code)}, signal=${String(signal)})`,
         ),
       );
     });
