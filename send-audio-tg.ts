@@ -1,10 +1,8 @@
-import dns from 'node:dns';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { preferIpv4 } from './lib/prefer-ipv4.ts';
 
-// Linux (Raspberry Pi included) often returns AAAA first. Node then tries IPv6
-// and `fetch` to Telegram times out even when `curl https://api.telegram.org` works.
-dns.setDefaultResultOrder('ipv4first');
+preferIpv4();
 
 
 /** Returned by `tgGetChat`; used when checking that `CHAT_ID` is a family group. */
