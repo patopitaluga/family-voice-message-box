@@ -17,13 +17,11 @@
 
 ------
 
-![Mockup de la caja de mensajes de voz](docs/mockup.png)
-
-*Mockup provisional (caja de madera comprada + botones arcade) — se reemplazará por una foto del proyecto real.*
+![Versión actual de la caja de mensajes de voz](docs/v1.jpg)
 
 Una caja con dos botones. Eso es todo lo que necesita un niño para hablar con su familia.
 
-Pulsa el botón grande para hablar y enviar un mensaje de voz al grupo de Telegram de la familia. Cuando llegan las respuestas, el botón junto al parlante se enciende para escucharlas. Sin pantallas, sin apps, sin depender de un teléfono.
+Pulsa el botón superior para hablar y enviar un mensaje de voz al grupo de Telegram de la familia. Cuando llegan las respuestas, el botón junto al parlante se enciende para escucharlas. Sin pantallas, sin apps, sin depender de un teléfono.
 
 Diseñada para acompañarlo donde esté: funciona con batería y no necesita estar enchufada.
 
