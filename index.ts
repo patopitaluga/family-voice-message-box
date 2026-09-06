@@ -13,15 +13,20 @@ import type { StopListening } from './lib/hold-to-talk.ts';
 import { combineLeds } from './lib/combine-leds.ts';
 import { createConsoleLedPair } from './lib/create-console-led-pair.ts';
 import { createRaspberryGpioLed } from './lib/raspberry-gpio-led.ts';
-import { warnIfNoAlsaCaptureDevice } from './lib/raspberry-audio.ts';
+import { blinkLedsOnce } from './lib/blink-leds-once.ts';
+import { reportAlsaCaptureDevice } from './lib/raspberry-audio.ts';
 import { isRaspberryPiOsHost } from './lib/is-raspberry-pi-os-host.ts';
 import { listenToFamilyGroupVoices } from './lib/listen-family-group-voices.ts';
 import { ensureTempDir, tempPath } from './lib/temp-dir.ts';
 import {
   tgGetMe,
   tgRequireFamilyGroup,
+  tgSendMessage,
   tgSendVoice,
 } from './send-audio-tg.ts';
+
+/** Sent to the family group once every listener is up, so they know the box is on. */
+const READY_MESSAGE = 'Family Voice Box lista para comunicarse!';
 
 const telegramToken = process.env.TELEGRAM_TOKEN?.trim();
 const chatId = process.env.CHAT_ID?.trim();
@@ -43,8 +48,6 @@ const audio = createAudioControl(platform);
 
 await ensureTempDir();
 
-if (platform === 'raspberry') await warnIfNoAlsaCaptureDevice();
-
 const gpioChip = process.env.GPIO_CHIP ?? 'gpiochip0';
 const recordLedLine = Number(process.env.GPIO_RECORD_LED ?? '27');
 const playLedLine = Number(process.env.GPIO_PLAY_LED ?? '23');
@@ -59,6 +62,14 @@ const playLed =
     ? combineLeds(createRaspberryGpioLed(gpioChip, playLedLine), consoleLeds.play)
     : consoleLeds.play;
 
+if (platform === 'raspberry') {
+  console.log(
+    `Probando LEDs 2 s: grabar (GPIO ${String(recordLedLine)}) y oír (GPIO ${String(playLedLine)}). ` +
+      'Los dos tienen que encenderse; el que no, está mal cableado.',
+  );
+  await blinkLedsOnce([recordLed, playLed]);
+}
+
 let currentRecordingPath: string | undefined;
 let recordingStartedAt: number | undefined;
 let isRecording = false;
@@ -66,9 +77,22 @@ let isRecording = false;
 /** Local OGG paths from the family group, waiting to be played. */
 const pendingInboundOggs: string[] = [];
 
+/** Kept on disk after playing so the play button can repeat it as many times as wanted. */
+let lastPlayedOgg: string | undefined;
+
 /** Used when a family voice arrives or after play drains the queue. */
 function setUnheardAudio(pending: boolean): void {
   playLed.set(pending);
+}
+
+/** Used in `onPlayLast` to forget a repeat whose file is no longer on disk. */
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await stat(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const handlers = {
@@ -162,24 +186,35 @@ const handlers = {
   async onPlayLast() {
     if (isRecording) return;
 
-    const oggPath = pendingInboundOggs.shift();
+    const unheard = pendingInboundOggs.shift();
     setUnheardAudio(pendingInboundOggs.length > 0);
 
+    const oggPath = unheard ?? lastPlayedOgg;
     if (oggPath === undefined) {
-      console.log('No hay audios nuevos del grupo para reproducir.');
+      console.log('Todavía no llegó ningún audio del grupo.');
       return;
     }
 
     let wavPath: string | undefined;
     try {
-      console.log('Reproduciendo audio del grupo…');
+      console.log(
+        unheard === undefined
+          ? 'Repitiendo el último audio del grupo…'
+          : 'Reproduciendo audio nuevo del grupo…',
+      );
       wavPath = await convertOggOpusToWav(oggPath);
       await audio.play(wavPath);
-      await unlink(oggPath).catch(() => undefined);
+
+      if (lastPlayedOgg !== undefined && lastPlayedOgg !== oggPath) await unlink(lastPlayedOgg).catch(() => undefined);
+
+      lastPlayedOgg = oggPath;
     } catch (error: unknown) {
       console.error('No se pudo reproducir el audio:', error);
-      pendingInboundOggs.unshift(oggPath);
-      setUnheardAudio(true);
+      if (unheard !== undefined) {
+        pendingInboundOggs.unshift(unheard);
+        setUnheardAudio(true);
+      } else if (!(await fileExists(oggPath))) lastPlayedOgg = undefined;
+
     } finally {
       if (wavPath !== undefined) await unlink(wavPath).catch(() => undefined);
     }
@@ -231,6 +266,8 @@ console.log(
   `Grupo: ${familyGroup.title ?? '(sin título)'}  CHAT_ID=${String(familyGroup.id)}`,
 );
 
+if (platform === 'raspberry') await reportAlsaCaptureDevice();
+
 if (platform === 'mac') console.log(
     'Mantén pulsado espacio para grabar. Pulsa p para oír audios del grupo. ' +
       'LEDs en consola (●/○). Ctrl+C para salir.',
@@ -241,6 +278,13 @@ if (platform === 'mac') console.log(
       raspberryKeyHint +
       'LEDs también en consola (●/○). Ctrl+C para salir.',
   );
+
+try {
+  await tgSendMessage(telegramToken, chatId, READY_MESSAGE);
+  console.log(`Aviso enviado al grupo: ${READY_MESSAGE}`);
+} catch (error: unknown) {
+  console.error('No se pudo avisar al grupo que la caja está lista:', error);
+}
 
 await new Promise(() => {
   // Stay running until SIGINT / SIGTERM.

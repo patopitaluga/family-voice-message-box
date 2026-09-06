@@ -9,7 +9,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-/** Used in `parseAlsaHwCards` and `preferUsbAlsaCard`. */
+/** Used in `parseAlsaHwCards`, `preferUsbCaptureCard` and `preferPlaybackCard`. */
 type AlsaHwCard = {
   card: number;
   device: number;
@@ -40,7 +40,7 @@ function parseAlsaHwCards(listing: string): AlsaHwCard[] {
 }
 
 /**
- * Used in `warnIfNoAlsaCaptureDevice` and `pickAlsaPlughw`.
+ * Used in `reportAlsaCaptureDevice`, `pickCaptureDevice` and `pickPlaybackDevice`.
  */
 async function listAlsaHwCards(tool: 'arecord' | 'aplay'): Promise<AlsaHwCard[]> {
   try {
@@ -56,82 +56,155 @@ async function listAlsaHwCards(tool: 'arecord' | 'aplay'): Promise<AlsaHwCard[]>
   }
 }
 
+/** Used in `preferUsbCaptureCard` and `reportAlsaCaptureDevice`. */
+function isUsbCard(card: AlsaHwCard): boolean {
+  return /usb|headset|microphone|\bmic\b|webcam|pnpsound/i.test(
+    `${card.id} ${card.name}`,
+  );
+}
+
 /**
- * Used in `pickAlsaPlughw` and `warnIfNoAlsaCaptureDevice`.
- * Pi onboard/HDMI cards are usually playback-only; USB headsets show up as capture.
+ * Used in `preferUsbCaptureCard`.
+ * Onboard Pi audio (`bcm2835` jack, `vc4-hdmi`) is playback-only, so it must never
+ * win the capture pick even when ALSA numbers it as card 0.
  */
-function preferUsbAlsaCard(cards: AlsaHwCard[]): AlsaHwCard | undefined {
-  const usb = cards.find((card) =>
+function isOnboardPiCard(card: AlsaHwCard): boolean {
+  return /bcm2835|vc4|hdmi/i.test(`${card.id} ${card.name}`);
+}
+
+/** Used in `pickCaptureDevice` and `reportAlsaCaptureDevice`. */
+function preferUsbCaptureCard(cards: AlsaHwCard[]): AlsaHwCard | undefined {
+  return (
+    cards.find((card) => isUsbCard(card) && !isOnboardPiCard(card)) ??
+    cards.find((card) => !isOnboardPiCard(card)) ??
+    cards[0]
+  );
+}
+
+/**
+ * Used in `pickPlaybackDevice`.
+ * Unlike capture, the box can legitimately play through the Pi 3.5 mm jack.
+ */
+function preferPlaybackCard(cards: AlsaHwCard[]): AlsaHwCard | undefined {
+  const known = cards.find((card) =>
     /usb|headset|headphone|microphone|\bmic\b|webcam|pnpsound/i.test(
       `${card.id} ${card.name}`,
     ),
   );
-  return usb ?? cards[0];
+  return known ?? cards[0];
 }
 
-/** Used in `warnIfNoAlsaCaptureDevice` and `createRaspberryAudioControl`. */
+/** Used in `reportAlsaCaptureDevice`, `pickCaptureDevice` and `pickPlaybackDevice`. */
 function alsaPlughw(card: AlsaHwCard): string {
   return `plughw:${String(card.card)},${String(card.device)}`;
 }
 
+/** Used in `reportAlsaCaptureDevice`. */
+function describeAlsaCard(card: AlsaHwCard): string {
+  return `${card.name} (${alsaPlughw(card)})`;
+}
+
 /**
- * Used in `createRaspberryAudioControl`.
- * `ALSA_DEVICE` / `ALSA_PLAYBACK_DEVICE` win; otherwise first USB-looking card.
+ * Used in `createRaspberryAudioControl` when a recording starts.
+ * `ALSA_DEVICE` wins; otherwise the USB mic, never the onboard/HDMI card.
  */
-async function pickAlsaPlughw(
-  tool: 'arecord' | 'aplay',
-  envOverride: string | undefined,
-): Promise<string | undefined> {
-  const env = envOverride?.trim();
+async function pickCaptureDevice(): Promise<string | undefined> {
+  const env = process.env.ALSA_DEVICE?.trim();
   if (env !== undefined && env !== '') return env;
 
-  const hw = preferUsbAlsaCard(await listAlsaHwCards(tool));
+  const hw = preferUsbCaptureCard(await listAlsaHwCards('arecord'));
+  if (hw === undefined) return undefined;
+  return alsaPlughw(hw);
+}
+
+/** Used in `createRaspberryAudioControl` when playing an inbound voice note. */
+async function pickPlaybackDevice(): Promise<string | undefined> {
+  const env = (
+    process.env.ALSA_PLAYBACK_DEVICE ?? process.env.ALSA_DEVICE
+  )?.trim();
+  if (env !== undefined && env !== '') return env;
+
+  const hw = preferPlaybackCard(await listAlsaHwCards('aplay'));
   if (hw === undefined) return undefined;
   return alsaPlughw(hw);
 }
 
 /**
- * Used in `index.ts` on `npm start`.
- * `arecord -l` lists capture cards; the Pi headphone jack is output-only.
- * ALSA `default` is often `pcm_asym` (playback, no capture slave) — we pick USB `plughw`.
+ * Used in `reportAlsaCaptureDevice`.
+ * USB mics often ship muted or near 0 %, which is the usual reason a recording is
+ * audible but far too quiet no matter how close you speak.
  */
-export async function warnIfNoAlsaCaptureDevice(): Promise<void> {
+async function readCaptureVolumePercent(card: number): Promise<number | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      'amixer',
+      ['-c', String(card), 'scontents'],
+      { encoding: 'utf8', timeout: 5000 },
+    );
+    const match = /Capture \d+ \[(\d+)%\]/.exec(stdout);
+    return match === null ? undefined : Number(match[1]);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Used in `index.ts` on `npm start`, printed as part of the startup banner.
+ * `arecord -l` only lists capture cards, so HDMI and the Pi jack never appear here.
+ * ALSA `default` is often `pcm_asym` (playback, no capture slave) — we pick a USB `plughw`.
+ */
+export async function reportAlsaCaptureDevice(): Promise<void> {
   let cards: AlsaHwCard[];
   try {
     cards = await listAlsaHwCards('arecord');
   } catch (error: unknown) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
       console.warn(
-        'No se encontró `arecord`. Instala alsa-utils: sudo apt install -y alsa-utils',
+        'Micrófono: no se encontró `arecord`. Instala alsa-utils: sudo apt install -y alsa-utils',
       );
       return;
     }
 
-    console.warn('No se pudo listar dispositivos de captura (`arecord -l`).', error);
+    console.warn('Micrófono: no se pudo listar la captura (`arecord -l`).', error);
     return;
   }
 
   if (cards.length === 0) {
     console.warn(
-      'No hay micrófono de captura (`arecord -l` está vacío). ' +
-        'El jack de auriculares de la Raspberry Pi no tiene entrada de micrófono. ' +
-        'Enchufa un micrófono USB (u otro dispositivo de captura) y vuelve a ejecutar npm start.',
+      'Micrófono: ninguno. `arecord -l` está vacío y el jack de la Pi no tiene entrada. ' +
+        'Enchufa un micrófono USB y vuelve a ejecutar npm start.',
     );
     return;
   }
 
   const env = process.env.ALSA_DEVICE?.trim();
   if (env !== undefined && env !== '') {
-    console.log(`Captura ALSA: ${env} (ALSA_DEVICE)`);
+    console.log(`Micrófono: ${env} (forzado con ALSA_DEVICE en .env)`);
     return;
   }
 
-  const hw = preferUsbAlsaCard(cards);
+  const hw = preferUsbCaptureCard(cards);
   if (hw === undefined) return;
 
+  console.log(`Micrófono: ${describeAlsaCard(hw)}`);
+
+  if (!isUsbCard(hw)) console.warn(
+      '  No parece un micrófono USB. Si enchufaste uno, comprueba que la Pi lo vea con `arecord -l`.',
+    );
+
+  const others = cards.filter((card) => card !== hw);
+  if (others.length > 0) console.log(
+      `  Otras entradas: ${others.map(describeAlsaCard).join(', ')}. ` +
+        'Para forzar una: ALSA_DEVICE=plughw:N,0 en .env',
+    );
+
+  const volume = await readCaptureVolumePercent(hw.card);
+  if (volume === undefined) return;
+
   console.log(
-    `Captura ALSA: ${alsaPlughw(hw)} (${hw.name}). ` +
-      'El PCM default de la Pi no graba (pcm_asym). Para forzar otro: ALSA_DEVICE=plughw:N,0',
+    volume < 80
+      ? `  Ganancia de captura: ${String(volume)} % — baja. Súbela con \`alsamixer -c ${String(hw.card)}\` (F4 = Capture) y guárdala con \`sudo alsactl store\`.`
+      : `  Ganancia de captura: ${String(volume)} %`,
   );
 }
 
@@ -160,7 +233,7 @@ export function createRaspberryAudioControl(): AudioControl {
     async startRecording(outputPath: string): Promise<void> {
       if (recording) throw new Error('Recording already in progress');
 
-      const device = await pickAlsaPlughw('arecord', process.env.ALSA_DEVICE);
+      const device = await pickCaptureDevice();
       recordingStderr = '';
       const child = startAudioProcess('arecord', arecordArgs(outputPath, device));
 
@@ -245,10 +318,7 @@ export function createRaspberryAudioControl(): AudioControl {
     },
 
     async play(filePath: string): Promise<void> {
-      const device = await pickAlsaPlughw(
-        'aplay',
-        process.env.ALSA_PLAYBACK_DEVICE ?? process.env.ALSA_DEVICE,
-      );
+      const device = await pickPlaybackDevice();
       if (device !== undefined && !loggedPlayback) {
         loggedPlayback = true;
         console.log(`Reproducción ALSA: ${device}`);

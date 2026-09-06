@@ -162,7 +162,7 @@ export async function tgFindRecentFamilyGroups(
 }
 
 /**
- * Used in `ping-tg.ts`.
+ * Used in `ping-tg.ts` and `index.ts`.
  * Sends a plain text message via Telegram `sendMessage`.
  */
 export async function tgSendMessage(
