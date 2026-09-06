@@ -11,7 +11,7 @@ Group=__USER__
 WorkingDirectory=__APP_DIR__
 # Loads TELEGRAM_TOKEN / CHAT_ID / GPIO_* for the process environment.
 EnvironmentFile=-__APP_DIR__/.env
-ExecStart=__NODE__ --env-file=.env index.ts raspberry
+ExecStart=__NODE__ --env-file=.env index.ts prod
 Restart=on-failure
 RestartSec=5
 

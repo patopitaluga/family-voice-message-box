@@ -8,8 +8,8 @@
     "node": ">=24.7.0"
   },
   "scripts": {
-    "start": "node --env-file=.env index.ts raspberry",
-    "start:dev": "node --env-file=.env index.ts mac",
+    "start": "node --env-file=.env index.ts prod",
+    "start:dev": "node --env-file=.env index.ts dev",
     "ping:tg": "node --env-file=.env ping-tg.ts",
     "find:group": "node --env-file=.env find-group-tg.ts",
     "lint": "eslint ."

@@ -1,5 +1,5 @@
 /**
- * USB/local keyboard stand-in for GPIO buttons on Raspberry Pi (`npm start`).
+ * USB/local keyboard stand-in for GPIO buttons on Raspberry Pi, `dev` mode only.
  * Used from `index.ts`. Falls back to `terminal-keys.ts` when no evdev device opens.
  *
  * Uses the `input-event` package (Linux `/dev/input`, real key-up). Needs a
@@ -60,7 +60,7 @@ async function listKeyboardDevices(): Promise<string[]> {
 }
 
 /**
- * Used in `index.ts` for `npm start` on Raspberry Pi.
+ * Used in `index.ts` for `npm run start:dev` on Raspberry Pi.
  * Hold space to record; `p` plays. Returns `undefined` if no keyboard could be opened.
  */
 export async function listenToLinuxKeyboard(

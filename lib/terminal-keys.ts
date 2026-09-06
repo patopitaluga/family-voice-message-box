@@ -15,8 +15,9 @@
  *
  * `FIRST_REPEAT_GRACE_MS` must exceed that initial delay, or the first repeat
  * looks like a new press and recording stops at ~0.5s. After repeats are
- * systemd has no TTY; this path does not run there. `index.ts` only uses this
- * when `listenToLinuxKeyboard` cannot open an evdev device.
+ * Only reached in `dev` mode (`npm run start:dev`), and only when
+ * `listenToLinuxKeyboard` cannot open an evdev device. `npm start` never gets
+ * here: the box in service listens to the GPIO buttons and nothing else.
  */
 import type { HoldToTalkHandlers, StopListening } from './hold-to-talk.ts';
 
@@ -30,7 +31,7 @@ const FIRST_REPEAT_GRACE_MS = 1500;
 const HELD_RELEASE_MS = 80;
 
 /**
- * Used in `index.ts` for `npm start` on Raspberry Pi.
+ * Used in `index.ts` for `npm run start:dev` on Raspberry Pi.
  * Hold space to record; `p` plays. No-op when stdin is not a TTY (systemd).
  * Why space uses timers: see the file comment (TTY has no key-up).
  */

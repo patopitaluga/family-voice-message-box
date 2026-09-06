@@ -130,22 +130,41 @@ async function pickPlaybackDevice(): Promise<string | undefined> {
 }
 
 /**
- * Used in `reportAlsaCaptureDevice`.
- * USB mics often ship muted or near 0 %, which is the usual reason a recording is
- * audible but far too quiet no matter how close you speak.
+ * Used in `reportAlsaCaptureDevice` and `reportAlsaPlaybackDevice`.
+ * Cards often ship muted or near 0 %, which is the usual reason audio is audible
+ * but far too quiet no matter how close you speak or how loud the speaker is.
  */
-async function readCaptureVolumePercent(card: number): Promise<number | undefined> {
+async function readMixerVolumePercent(
+  card: number,
+  direction: 'Capture' | 'Playback',
+): Promise<number | undefined> {
   try {
     const { stdout } = await execFileAsync(
       'amixer',
       ['-c', String(card), 'scontents'],
       { encoding: 'utf8', timeout: 5000 },
     );
-    const match = /Capture \d+ \[(\d+)%\]/.exec(stdout);
+    const match = new RegExp(`${direction} \\d+ \\[(\\d+)%\\]`).exec(stdout);
     return match === null ? undefined : Number(match[1]);
   } catch {
     return undefined;
   }
+}
+
+/** Used in `reportAlsaCaptureDevice` and `reportAlsaPlaybackDevice`. */
+function volumeLine(
+  label: string,
+  volume: number,
+  card: number,
+  hint: string,
+): string {
+  const base = `  ${label}: ${String(volume)} %`;
+  if (volume >= 80) return base;
+
+  return (
+    `${base} — baja. Súbela con \`alsamixer -c ${String(card)}\` (${hint}) ` +
+    'y guárdala con `sudo alsactl store`.'
+  );
 }
 
 /**
@@ -198,14 +217,52 @@ export async function reportAlsaCaptureDevice(): Promise<void> {
         'Para forzar una: ALSA_DEVICE=plughw:N,0 en .env',
     );
 
-  const volume = await readCaptureVolumePercent(hw.card);
+  const volume = await readMixerVolumePercent(hw.card, 'Capture');
   if (volume === undefined) return;
 
-  console.log(
-    volume < 80
-      ? `  Ganancia de captura: ${String(volume)} % — baja. Súbela con \`alsamixer -c ${String(hw.card)}\` (F4 = Capture) y guárdala con \`sudo alsactl store\`.`
-      : `  Ganancia de captura: ${String(volume)} %`,
-  );
+  console.log(volumeLine('Ganancia de captura', volume, hw.card, 'F4 = Capture'));
+}
+
+/**
+ * Used in `index.ts` on `npm start`, right after `reportAlsaCaptureDevice`.
+ * Same idea for the speaker side: a card at 30 % sounds broken, not quiet.
+ */
+export async function reportAlsaPlaybackDevice(): Promise<void> {
+  let cards: AlsaHwCard[];
+  try {
+    cards = await listAlsaHwCards('aplay');
+  } catch {
+    return;
+  }
+
+  if (cards.length === 0) {
+    console.warn('Parlante: ninguno (`aplay -l` está vacío).');
+    return;
+  }
+
+  const env = (
+    process.env.ALSA_PLAYBACK_DEVICE ?? process.env.ALSA_DEVICE
+  )?.trim();
+  if (env !== undefined && env !== '') {
+    console.log(`Parlante: ${env} (forzado en .env)`);
+    return;
+  }
+
+  const hw = preferPlaybackCard(cards);
+  if (hw === undefined) return;
+
+  console.log(`Parlante: ${describeAlsaCard(hw)}`);
+
+  const others = cards.filter((card) => card !== hw);
+  if (others.length > 0) console.log(
+      `  Otras salidas: ${others.map(describeAlsaCard).join(', ')}. ` +
+        'Para forzar una: ALSA_PLAYBACK_DEVICE=plughw:N,0 en .env',
+    );
+
+  const volume = await readMixerVolumePercent(hw.card, 'Playback');
+  if (volume === undefined) return;
+
+  console.log(volumeLine('Volumen de salida', volume, hw.card, 'F3 = Playback'));
 }
 
 /**

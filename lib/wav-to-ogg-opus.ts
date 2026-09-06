@@ -1,7 +1,8 @@
 import { runAudioCommand } from './run-audio-command.ts';
+import { isMissingFilter, speechNormalizeArgs } from './audio-normalize.ts';
 
 /**
- * Used in `convertWavToOggOpus`.
+ * Used in `encodeOpus`.
  * Raspberry Pi OS ffmpeg sometimes has native `opus` but not `libopus`.
  */
 function isMissingLibopus(error: unknown): boolean {
@@ -9,15 +10,13 @@ function isMissingLibopus(error: unknown): boolean {
   return /unknown encoder ['"]libopus['"]/i.test(message) || /encoder ['"]libopus['"] not found/i.test(message);
 }
 
-/**
- * Used in `index.ts` and previously `send-last-tg.ts` before `tgSendVoice`.
- * Writes an OGG/Opus file next to the WAV (or to `oggPath` when provided).
- */
-export async function convertWavToOggOpus(
+/** Used in `convertWavToOggOpus`. */
+async function encodeOpus(
   wavPath: string,
-  oggPath: string = wavPath.replace(/\.wav$/i, '.ogg'),
-): Promise<string> {
-  const common = ['-y', '-loglevel', 'error', '-i', wavPath];
+  oggPath: string,
+  filterArgs: string[],
+): Promise<void> {
+  const common = ['-y', '-loglevel', 'error', '-i', wavPath, ...filterArgs];
 
   try {
     await runAudioCommand('ffmpeg', [
@@ -45,6 +44,28 @@ export async function convertWavToOggOpus(
       '-2',
       oggPath,
     ]);
+  }
+}
+
+/**
+ * Used in `index.ts` and previously `send-last-tg.ts` before `tgSendVoice`.
+ * Writes an OGG/Opus file next to the WAV (or to `oggPath` when provided).
+ */
+export async function convertWavToOggOpus(
+  wavPath: string,
+  oggPath: string = wavPath.replace(/\.wav$/i, '.ogg'),
+): Promise<string> {
+  const filterArgs = speechNormalizeArgs();
+
+  try {
+    await encodeOpus(wavPath, oggPath, filterArgs);
+  } catch (error: unknown) {
+    if (filterArgs.length === 0 || !isMissingFilter(error)) throw error;
+
+    console.warn(
+      'Este ffmpeg no tiene `speechnorm`: se envía sin normalizar el volumen.',
+    );
+    await encodeOpus(wavPath, oggPath, []);
   }
 
   return oggPath;

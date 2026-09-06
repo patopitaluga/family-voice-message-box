@@ -96,6 +96,7 @@ Hay **dos botones LED** (momentáneos, active-low, pull-up interno):
 
 - LED de **grabar**: se enciende mientras está pulsado (está grabando).
 - LED de **oír**: se enciende **solo** cuando llega una nota de voz al grupo; se apaga al reproducirla. Pulsar el botón no lo enciende (con el LED apagado repite el último audio), así que sin mensajes nuevos queda apagado aunque el cableado esté bien. Para comprobarlo sin esperar a nadie, `npm start` enciende los dos LEDs 2 segundos al arrancar.
+- Si en ese test **no enciende ninguno**, mira el log antes de revisar cables: `journalctl -u family-voice-message-box -b | grep gpioset`. La línea solo está energizada mientras vive el proceso `gpioset`, así que cualquier salida inesperada suya (permisos, chip equivocado, una versión de libgpiod que no mantiene el valor) deja el LED apagado y queda registrada ahí.
 - GND: los ocho pines de masa (6, 9, 14, 20, 25, 30, 34, 39) son equivalentes, así que cada cable puede ir al que quede más cómodo. El diagrama usa uno distinto para cada masa — grabar en **6** y **9**, oír en **14** y **20** — para no meter dos cables en el mismo agujero. Quedan libres 25, 30, 34 y 39.
 
 Cada botón tiene **4 lengüetas**: izquierda, derecha, inferior y posterior. En el plástico, posterior y derecha suelen decir **COM** y **NO** (el clic). Izquierda e inferior son el LED (si no enciende, intercambialas). ~330 Ω en el GPIO del LED si hace falta.
@@ -240,7 +241,16 @@ npm install
 
 ### Ejecutar
 
-En ambos casos el proceso **queda corriendo**:
+Hay dos modos, y el proceso **queda corriendo** en ambos. El hardware se detecta solo, así que el modo es lo único que eliges:
+
+| Modo | Comando | Dónde | Entrada |
+|------|---------|-------|---------|
+| Producción | `npm start` | Solo Raspberry Pi | Botones GPIO, nada más |
+| Desarrollo | `npm run start:dev` | Raspberry Pi o Mac | Teclado, además de los botones si estás en la Pi |
+
+En la Pi, `start:dev` usa el mismo `arecord` / `aplay` y los mismos LEDs que producción — lo único que agrega es el teclado. Sirve para depurar la caja entera sin cablear botones ni levantar el servicio.
+
+#### Producción
 
 En la Raspberry Pi (botones GPIO + LEDs + `arecord` / `aplay`):
 
@@ -256,27 +266,45 @@ Al arrancar enciende los dos LEDs a la vez durante 2 segundos para que veas si e
 ```text
 Micrófono: USB PnP Sound Device (plughw:1,0)
   Ganancia de captura: 12 % — baja. Súbela con `alsamixer -c 1` (F4 = Capture) y guárdala con `sudo alsactl store`.
+Parlante: bcm2835 Headphones (plughw:0,0)
+  Volumen de salida: 40 % — baja. Súbela con `alsamixer -c 0` (F3 = Playback) y guárdala con `sudo alsactl store`.
 ```
 
 Cuando todo está listo avisa al grupo familiar con un mensaje de texto — **“Family Voice Box lista para comunicarse!”** — así se sabe que la caja está encendida sin tener que preguntar. Si ese envío falla, lo registra en consola pero la caja sigue funcionando igual.
 
-**Si las grabaciones salen muy bajas** (da igual hablar cerca o lejos), casi siempre es la ganancia de captura, no el micrófono: muchos USB vienen de fábrica cerca de 0 %. Abre `alsamixer -c 1`, pulsa **F4** para ver las entradas, sube `Mic` / `Capture` con las flechas, activa el boost si aparece, y persístelo con `sudo alsactl store`. La HDMI no puede ser la culpable: `arecord -l` solo lista dispositivos de captura y las salidas de la Pi (jack y HDMI) no graban.
+#### Volumen
 
-Si estás en la Pi y todavía no cableaste los botones, enchufa un **teclado USB** (no el de SSH): `npm start` usa evdev (`input-event`) con **espacio** (mantener) y **p** (oír). El usuario debe estar en el grupo `input`:
+Hay dos niveles distintos y conviene no confundirlos.
+
+El **mezclador de ALSA** es la ganancia fija del hardware, y es la causa habitual de que todo suene bajo: muchas placas USB vienen de fábrica cerca de 0 %. Es lo que reporta el arranque. Se ajusta con `alsamixer -c N` —**F4** para las entradas, **F3** para las salidas— y se persiste con `sudo alsactl store`, si no se pierde al reiniciar. La HDMI nunca puede ser la culpable de una grabación baja: `arecord -l` solo lista dispositivos de captura, y las salidas de la Pi (jack y HDMI) no graban.
+
+La **normalización por software** es lo que hace este proyecto con ffmpeg en cada audio, porque el mezclador es un valor fijo y el niño habla a distinta distancia cada vez. Al enviar aplica `speechnorm`, que nivela la voz; al reproducir aplica `loudnorm` a −14 LUFS, para que las notas de voz de la familia lleguen todas al mismo volumen. Si tu ffmpeg no trae alguno de esos filtros, avisa en el log y sigue sin normalizar. Para desactivarlo, `AUDIO_NORMALIZE=off` en `.env`.
+
+Súbelo primero en el mezclador y deja la normalización para lo que el mezclador no puede arreglar. Normalizar una señal muy débil amplifica también el ruido de fondo.
+
+`npm start` **ignora el teclado**: solo escucha los botones GPIO. Un teclado USB olvidado dentro de la caja, o una placa de sonido USB que se registra como HID, podrían disparar grabaciones fantasma, así que en funcionamiento los botones son la única fuente de pulsaciones.
+
+Además, las grabaciones de **menos de 2 segundos no se envían**: casi siempre son una pulsación fantasma. El WAV queda en `temp/` y el motivo se registra en el log, para poder escucharlo y entender qué las dispara.
+
+En la Pi conviene el [arranque automático](#arranque-automático-raspberry-pi) en lugar de lanzar `npm start` a mano.
+
+#### Desarrollo
+
+Espacio (mantener) para grabar y `p` para oír audios del grupo. Los LEDs de grabar/oír se reflejan en consola (`●`/`○`) con la misma lógica que en la Pi:
+
+```bash
+npm run start:dev
+```
+
+En la Pi este modo lee el teclado por evdev (`input-event`), que da key-up real. Enchufa un **teclado USB** a la Pi — el de tu sesión SSH no cuenta — y agrega tu usuario al grupo `input`:
 
 ```bash
 sudo usermod -aG input $USER
 ```
 
-Cierra sesión o reinicia después. Si no hay dispositivo `*-event-kbd`, cae al teclado de la terminal SSH (sin key-up real). El servicio systemd no usa teclado: ahí solo cuentan los botones GPIO.
+Cierra sesión o reinicia después. Si no aparece ningún `*-event-kbd`, cae al teclado de la propia terminal SSH, que no tiene key-up y por eso infiere el "soltar" con temporizadores. Para forzar un dispositivo: `EVDEV_KEYBOARD=/dev/input/eventN` en `.env`.
 
-Sin pantalla ni teclado, en la Pi conviene el [arranque automático](#arranque-automático-raspberry-pi) en lugar de lanzar `npm start` a mano.
-
-En la Mac, durante el desarrollo (espacio para grabar, `p` para oír audios del grupo). Los LEDs de grabar/oír se reflejan en consola (`●`/`○`) con la misma lógica que en la Pi:
-
-```bash
-npm run start:dev
-```
+Si el servicio systemd está activo, párala antes (`sudo systemctl stop family-voice-message-box`) o los dos procesos pelearán por las líneas GPIO.
 
 **Calidad de audio en Mac (`start:dev`):** puede sonar mal — baja calidad, clicks y microcortes. No es un fallo de este proyecto ni del terminal: en macOS, la captura por `ffmpeg` + AVFoundation tiene ese problema conocido. El modo dev sirve para probar el flujo (botón, tiempos, Telegram), no para juzgar la calidad final del micrófono. La calidad real se evalúa en la Raspberry Pi (`npm start`).
 

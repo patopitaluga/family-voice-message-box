@@ -1,21 +1,24 @@
 import { stat, unlink } from 'node:fs/promises';
 import {
   createAudioControl,
-  parsePlatform,
+  detectPlatform,
+  parseRunMode,
 } from './lib/create-audio-control.ts';
 import { convertOggOpusToWav } from './lib/ogg-opus-to-wav.ts';
 import { convertWavToOggOpus } from './lib/wav-to-ogg-opus.ts';
 import { listenToMacSpacebar } from './lib/mac-spacebar.ts';
 import { listenToRaspberryButtons } from './lib/raspberry-button.ts';
-import { listenToLinuxKeyboard } from './lib/linux-keyboard.ts';
-import { listenToTerminalKeys } from './lib/terminal-keys.ts';
 import type { StopListening } from './lib/hold-to-talk.ts';
 import { combineLeds } from './lib/combine-leds.ts';
 import { createConsoleLedPair } from './lib/create-console-led-pair.ts';
 import { createRaspberryGpioLed } from './lib/raspberry-gpio-led.ts';
 import { blinkLedsOnce } from './lib/blink-leds-once.ts';
-import { reportAlsaCaptureDevice } from './lib/raspberry-audio.ts';
-import { isRaspberryPiOsHost } from './lib/is-raspberry-pi-os-host.ts';
+import {
+  reportAlsaCaptureDevice,
+  reportAlsaPlaybackDevice,
+} from './lib/raspberry-audio.ts';
+import { listenToLinuxKeyboard } from './lib/linux-keyboard.ts';
+import { listenToTerminalKeys } from './lib/terminal-keys.ts';
 import { listenToFamilyGroupVoices } from './lib/listen-family-group-voices.ts';
 import { ensureTempDir, tempPath } from './lib/temp-dir.ts';
 import {
@@ -28,6 +31,12 @@ import {
 /** Sent to the family group once every listener is up, so they know the box is on. */
 const READY_MESSAGE = 'Family Voice Box lista para comunicarse!';
 
+/**
+ * Shorter than this is a phantom press (GPIO noise, a stray key), not a message.
+ * Those recordings are kept in `temp/` instead of sent, so they can be inspected.
+ */
+const MIN_RECORDING_MS = 2000;
+
 const telegramToken = process.env.TELEGRAM_TOKEN?.trim();
 const chatId = process.env.CHAT_ID?.trim();
 
@@ -37,10 +46,14 @@ if (!chatId) throw new Error('CHAT_ID is not set');
 const familyGroup = await tgRequireFamilyGroup(telegramToken, chatId);
 const bot = await tgGetMe(telegramToken);
 
-const platform = parsePlatform();
+const mode = parseRunMode();
+const platform = detectPlatform();
 
-if (platform === 'raspberry' && !isRaspberryPiOsHost()) {
-  console.error('Este software está diseñado para correr en una Raspberry');
+if (mode === 'prod' && platform !== 'raspberry') {
+  console.error(
+    '`npm start` es la caja en funcionamiento y necesita una Raspberry. ' +
+      'Fuera de la Pi usa `npm run start:dev`.',
+  );
   process.exit(1);
 }
 
@@ -144,7 +157,7 @@ const handlers = {
     let durationLabel = 'duración desconocida';
     if (durationMs !== undefined) {
       const seconds = durationMs / 1000;
-      if (seconds < 60) durationLabel = `${seconds.toFixed(1)} s`;
+      if (seconds < 60) durationLabel = `${seconds.toFixed(1)} s / ${String(durationMs)} ms`;
        else {
         const minutes = Math.floor(seconds / 60);
         const remainder = seconds - minutes * 60;
@@ -161,6 +174,14 @@ const handlers = {
       console.error(
         'arecord no escribió el WAV. En la Pi: arecord -l  (tiene que haber un dispositivo de captura). ' +
           'Grupo audio: sudo usermod -aG audio $USER. Opcional: ALSA_DEVICE=plughw:1,0 en .env',
+      );
+      return;
+    }
+
+    if (durationMs !== undefined && durationMs < MIN_RECORDING_MS) {
+      console.warn(
+        `No se envía: ${String(durationMs)} ms está por debajo del mínimo de ${String(MIN_RECORDING_MS)} ms. ` +
+          `Suele ser una pulsación fantasma. El audio queda en ${wavPath} para escucharlo (aplay ${wavPath}).`,
       );
       return;
     }
@@ -222,22 +243,28 @@ const handlers = {
 };
 
 let stopButtons: StopListening;
-let raspberryKeyHint = '';
+let keyboardHint = '';
 if (platform === 'mac') stopButtons = await listenToMacSpacebar(handlers);
  else {
   const stopGpio = listenToRaspberryButtons(handlers);
-  const stopEvdev = await listenToLinuxKeyboard(handlers);
-  const stopKeys = stopEvdev ?? listenToTerminalKeys(handlers);
-  raspberryKeyHint =
-    stopEvdev !== undefined
-      ? 'Teclado USB (evdev): mantén espacio para grabar, p para oír. '
-      : process.stdin.isTTY
-        ? 'Sin teclado evdev: espacio en esta terminal, p para oír. '
-        : '';
-  stopButtons = () => {
-    stopGpio();
-    stopKeys();
-  };
+
+  // In `prod` the buttons are the only source of presses: a USB keyboard left in
+  // the box (or a sound card that registers as HID) must not start a recording.
+  if (mode === 'prod') stopButtons = stopGpio;
+   else {
+    const stopEvdev = await listenToLinuxKeyboard(handlers);
+    const stopKeys = stopEvdev ?? listenToTerminalKeys(handlers);
+    keyboardHint =
+      stopEvdev !== undefined
+        ? 'Teclado USB (evdev): mantén espacio para grabar, p para oír. '
+        : process.stdin.isTTY
+          ? 'Sin teclado evdev: espacio en esta terminal, p para oír. '
+          : '';
+    stopButtons = () => {
+      stopGpio();
+      stopKeys();
+    };
+  }
 }
 
 const stopTelegram = listenToFamilyGroupVoices({
@@ -266,7 +293,10 @@ console.log(
   `Grupo: ${familyGroup.title ?? '(sin título)'}  CHAT_ID=${String(familyGroup.id)}`,
 );
 
-if (platform === 'raspberry') await reportAlsaCaptureDevice();
+if (platform === 'raspberry') {
+  await reportAlsaCaptureDevice();
+  await reportAlsaPlaybackDevice();
+}
 
 if (platform === 'mac') console.log(
     'Mantén pulsado espacio para grabar. Pulsa p para oír audios del grupo. ' +
@@ -275,7 +305,7 @@ if (platform === 'mac') console.log(
  else console.log(
     `Botón grabar: GPIO ${process.env.GPIO_RECORD_BUTTON ?? process.env.GPIO_LINE ?? '17'} (LED ${String(recordLedLine)}). ` +
       `Botón oír: GPIO ${process.env.GPIO_PLAY_BUTTON ?? '22'} (LED ${String(playLedLine)}). ` +
-      raspberryKeyHint +
+      (mode === 'prod' ? 'Sin teclado: solo los botones. ' : keyboardHint) +
       'LEDs también en consola (●/○). Ctrl+C para salir.',
   );
 
