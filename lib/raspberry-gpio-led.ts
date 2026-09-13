@@ -45,6 +45,8 @@ export function createRaspberryGpioLed(chip: string, line: number): Led {
   if (!Number.isInteger(line) || line < 0) throw new Error(`Invalid GPIO LED line: ${String(line)}`);
 
   let child: ChildProcess | undefined;
+  /** `undefined` until the first `set`: the real line state is unknown at start. */
+  let current: boolean | undefined;
 
   const stop = (): void => {
     if (child === undefined) return;
@@ -54,6 +56,11 @@ export function createRaspberryGpioLed(chip: string, line: number): Led {
 
   return {
     set(on: boolean): void {
+      // Re-setting the same value would SIGTERM the live `gpioset` and start
+      // another one: the line drops for a moment and the LED blinks.
+      if (on === current) return;
+      current = on;
+
       stop();
       const started = spawn('gpioset', gpiosetHoldArgs(chip, line, on), {
         stdio: ['ignore', 'ignore', 'pipe'],
@@ -77,11 +84,16 @@ export function createRaspberryGpioLed(chip: string, line: number): Led {
         // We SIGTERM the previous process on every `set` and on `close`.
         if (signal !== null) return;
 
+        // Nobody drives the line now, so the cached value is a lie: drop it or
+        // the next `set` to the same value would be skipped and never recover.
+        if (child === started) current = undefined;
+
         reportUnexpectedExit(chip, line, code, stderr);
       });
     },
 
     close(): void {
+      current = undefined;
       stop();
     },
   };

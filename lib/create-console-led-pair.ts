@@ -28,6 +28,8 @@ export function createConsoleLedPair(): ConsoleLedPair {
   return {
     record: {
       set(on: boolean): void {
+        // Key auto-repeat calls `set` many times per hold; only edges are news.
+        if (on === recordOn) return;
         recordOn = on;
         paint();
       },
@@ -37,6 +39,7 @@ export function createConsoleLedPair(): ConsoleLedPair {
     },
     play: {
       set(on: boolean): void {
+        if (on === playOn) return;
         playOn = on;
         paint();
       },

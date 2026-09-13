@@ -44,7 +44,15 @@ export async function listenToMacSpacebar(
   let playInFlight = false;
 
   const listener = (event: { name?: string; state: 'DOWN' | 'UP' }): void => {
+    if (event.name === 'P' && event.state === 'UP') {
+      handlers.onPlayHeld?.(false);
+      return;
+    }
+
     if (event.name === 'P' && event.state === 'DOWN') {
+      // Before the guards: the LED mirrors the key, even if there is nothing to play.
+      handlers.onPlayHeld?.(true);
+
       if (held || pressInFlight || playInFlight || !handlers.onPlayLast) return;
 
       playInFlight = true;

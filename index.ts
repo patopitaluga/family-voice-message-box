@@ -29,7 +29,7 @@ import {
   tgSendVoice,
 } from './send-audio-tg.ts';
 
-/** Sent to the family group once every listener is up, so they know the box is on. */
+/** Sent by `announceReady` once every listener is up, so the family knows the box is on. */
 const READY_MESSAGE = 'Family Voice Box lista para comunicarse!';
 
 /**
@@ -95,6 +95,16 @@ const pendingInboundOggs: string[] = [];
 let lastPlayedOgg: string | undefined;
 
 let unheardAudio = false;
+let playButtonHeld = false;
+
+/**
+ * Used in `setUnheardAudio` and the `onPlayHeld` handler.
+ * Two independent reasons to be lit, so both have to be re-evaluated together:
+ * otherwise draining the queue mid-press would switch the LED off under the finger.
+ */
+function refreshPlayLed(): void {
+  playLed.set(unheardAudio || playButtonHeld);
+}
 
 /**
  * Used when a family voice arrives or after play drains the queue.
@@ -104,7 +114,7 @@ let unheardAudio = false;
 function setUnheardAudio(pending: boolean): void {
   const turnedOn = pending && !unheardAudio;
   unheardAudio = pending;
-  playLed.set(pending);
+  refreshPlayLed();
 
   if (turnedOn && !isRecording) void playChime(audio);
 }
@@ -215,6 +225,11 @@ const handlers = {
     }
   },
 
+  onPlayHeld(pressed: boolean) {
+    playButtonHeld = pressed;
+    refreshPlayLed();
+  },
+
   async onPlayLast() {
     if (isRecording) return;
 
@@ -320,12 +335,22 @@ if (platform === 'mac') console.log(
       'LEDs también en consola (●/○). Ctrl+C para salir.',
   );
 
-try {
-  await tgSendMessage(telegramToken, chatId, READY_MESSAGE);
-  console.log(`Aviso enviado al grupo: ${READY_MESSAGE}`);
-} catch (error: unknown) {
-  console.error('No se pudo avisar al grupo que la caja está lista:', error);
-}
+/**
+ * Used once at the end of startup. Not a `function` declaration: hoisting one
+ * would lose the narrowing that already proved the token and chat id are set.
+ */
+const announceReady = async (): Promise<void> => {
+  try {
+    await tgSendMessage(telegramToken, chatId, READY_MESSAGE);
+    console.log(`Aviso enviado al grupo: ${READY_MESSAGE}`);
+  } catch (error: unknown) {
+    console.error('No se pudo avisar al grupo que la caja está lista:', error);
+  }
+};
+
+// A `dev` run is a debugging session: the family would get a ping on every restart.
+if (mode === 'prod') await announceReady();
+else console.log('Modo dev: no se avisa al grupo.');
 
 await new Promise(() => {
   // Stay running until SIGINT / SIGTERM.

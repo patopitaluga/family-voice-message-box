@@ -7,6 +7,11 @@ export type HoldToTalkHandlers = {
   onPress: () => void | Promise<void>;
   onRelease: () => void | Promise<void>;
   onPlayLast?: () => void | Promise<void>;
+  /**
+   * Both edges of the play button, for lighting its LED while held.
+   * Synchronous and never queued: the LED must follow the finger, not the audio.
+   */
+  onPlayHeld?: (pressed: boolean) => void;
 };
 
 /**

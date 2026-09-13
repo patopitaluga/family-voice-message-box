@@ -113,6 +113,9 @@ export async function listenToLinuxKeyboard(
 
   const onKeypress = (ev: EvdevKeyEvent): void => {
     if (ev.code === KEY_P) {
+      // Before the guards: the LED mirrors the key, even if there is nothing to play.
+      handlers.onPlayHeld?.(true);
+
       if (held || pressInFlight || playInFlight || handlers.onPlayLast === undefined) return;
 
       playInFlight = true;
@@ -145,6 +148,11 @@ export async function listenToLinuxKeyboard(
   };
 
   const onKeyup = (ev: EvdevKeyEvent): void => {
+    if (ev.code === KEY_P) {
+      handlers.onPlayHeld?.(false);
+      return;
+    }
+
     if (ev.code !== KEY_SPACE) return;
     if (!held) return;
 

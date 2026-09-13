@@ -48,6 +48,18 @@ export function listenToTerminalKeys(
   let pressInFlight = false;
   let releaseWhilePressInFlight = false;
   let playInFlight = false;
+  let playHeld = false;
+  let playReleaseTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** `p` has no key-up either, so its LED uses the same repeat trick as space. */
+  const armPlayRelease = (ms: number): void => {
+    if (playReleaseTimer !== undefined) clearTimeout(playReleaseTimer);
+    playReleaseTimer = setTimeout(() => {
+      playReleaseTimer = undefined;
+      playHeld = false;
+      handlers.onPlayHeld?.(false);
+    }, ms);
+  };
 
   const clearReleaseTimer = (): void => {
     if (releaseTimer === undefined) return;
@@ -85,7 +97,18 @@ export function listenToTerminalKeys(
       }
 
       if (byte === KEY_P || byte === KEY_P_LOWER) {
-        if (held || pressInFlight || playInFlight || handlers.onPlayLast === undefined) continue;
+        if (held || pressInFlight) continue;
+
+        // Outside the `playInFlight` guard: repeats must keep the LED lit while
+        // the first press is still playing, which is most of the hold.
+        if (playHeld) armPlayRelease(HELD_RELEASE_MS);
+        else {
+          playHeld = true;
+          handlers.onPlayHeld?.(true);
+          armPlayRelease(FIRST_REPEAT_GRACE_MS);
+        }
+
+        if (playInFlight || handlers.onPlayLast === undefined) continue;
 
         playInFlight = true;
         void Promise.resolve(handlers.onPlayLast())
@@ -128,6 +151,7 @@ export function listenToTerminalKeys(
   return () => {
     process.stdin.off('data', onData);
     clearReleaseTimer();
+    if (playReleaseTimer !== undefined) clearTimeout(playReleaseTimer);
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
   };
 }

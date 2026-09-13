@@ -26,6 +26,8 @@ function watchActiveLowButton(
   handlers: {
     onPress?: () => void | Promise<void>;
     onRelease?: () => void | Promise<void>;
+    /** Runs on every edge, before the busy gate, so LED feedback is never dropped. */
+    onEdge?: (pressed: boolean) => void;
   },
 ): StopListening {
   if (!Number.isInteger(line) || line < 0) throw new Error(`Invalid GPIO button line: ${String(line)}`);
@@ -74,6 +76,8 @@ function watchActiveLowButton(
       const pressed = edge === '0' || edge === '2' || edge === 'falling';
       const released = edge === '1' || edge === 'rising';
       if (!pressed && !released) continue;
+
+      handlers.onEdge?.(pressed);
 
       const run = pressed ? handlers.onPress : handlers.onRelease;
       if (run === undefined) continue;
@@ -130,6 +134,7 @@ export function listenToRaspberryButtons(
 
   const stopPlay = watchActiveLowButton(chip, playButton, {
     onPress: handlers.onPlayLast,
+    onEdge: handlers.onPlayHeld,
   });
 
   return () => {
