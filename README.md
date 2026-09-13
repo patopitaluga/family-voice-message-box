@@ -33,7 +33,7 @@ Al encenderla, la caja avisa al grupo familiar: *“Family Voice Box lista para 
 
 1. **Pulsa y mantén** el botón de grabar (su LED se enciende) y habla.
 2. **Suéltalo** para enviar el mensaje al grupo familiar.
-3. Cuando alguien responde con una nota de voz, el LED de **oír** se enciende; púlsalo para escuchar.
+3. Cuando alguien responde con una nota de voz, la caja suena y el LED de **oír** se enciende; púlsalo para escuchar.
 4. El botón de oír **siempre suena**: con el LED apagado repite el último audio, las veces que quiera.
 
 Simple para el niño. Cercano para todos.
@@ -95,7 +95,7 @@ Hay **dos botones LED** (momentáneos, active-low, pull-up interno):
 | **Oír** (última grabación / audio nuevo) | 22 | 15 | 23 | 16 |
 
 - LED de **grabar**: se enciende mientras está pulsado (está grabando).
-- LED de **oír**: se enciende **solo** cuando llega una nota de voz al grupo; se apaga al reproducirla. Pulsar el botón no lo enciende (con el LED apagado repite el último audio), así que sin mensajes nuevos queda apagado aunque el cableado esté bien. Para comprobarlo sin esperar a nadie, `npm start` enciende los dos LEDs 2 segundos al arrancar.
+- LED de **oír**: se enciende **solo** cuando llega una nota de voz al grupo, junto con el chime (`chimes.mp3`); se apaga al reproducirla. Pulsar el botón no lo enciende (con el LED apagado repite el último audio), así que sin mensajes nuevos queda apagado aunque el cableado esté bien. Para comprobarlo sin esperar a nadie, `npm start` enciende los dos LEDs 2 segundos al arrancar.
 - Si en ese test **no enciende ninguno**, mira el log antes de revisar cables: `journalctl -u family-voice-message-box -b | grep gpioset`. La línea solo está energizada mientras vive el proceso `gpioset`, así que cualquier salida inesperada suya (permisos, chip equivocado, una versión de libgpiod que no mantiene el valor) deja el LED apagado y queda registrada ahí.
 - GND: los ocho pines de masa (6, 9, 14, 20, 25, 30, 34, 39) son equivalentes, así que cada cable puede ir al que quede más cómodo. El diagrama usa uno distinto para cada masa — grabar en **6** y **9**, oír en **14** y **20** — para no meter dos cables en el mismo agujero. Quedan libres 25, 30, 34 y 39.
 
@@ -255,7 +255,8 @@ En la Pi, `start:dev` usa el mismo `arecord` / `aplay` y los mismos LEDs que pro
 En la Raspberry Pi (botones GPIO + LEDs + `arecord` / `aplay`):
 
 - Mantén pulsado **grabar** para hablar; suelta para enviar al grupo (el audio solo vive en `temp/` hasta enviarse).
-- Cuando alguien del grupo envía una nota de voz, el LED de **oír** se enciende; púlsalo para escucharla. Con el LED ya apagado, ese mismo botón repite el último audio cuantas veces quieras.
+- Cuando alguien del grupo envía una nota de voz, suena `chimes.mp3` y el LED de **oír** se enciende; púlsalo para escucharla. Con el LED ya apagado, ese mismo botón repite el último audio cuantas veces quieras.
+- El chime suena solo en la transición de apagado a encendido, y nunca mientras se está grabando, para no colarse en el mensaje del niño. Si `chimes.mp3` falta o ffmpeg no puede decodificarlo, lo avisa en el log una vez y la caja sigue funcionando en silencio.
 
 ```bash
 npm start

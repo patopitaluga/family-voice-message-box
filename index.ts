@@ -13,6 +13,7 @@ import { combineLeds } from './lib/combine-leds.ts';
 import { createConsoleLedPair } from './lib/create-console-led-pair.ts';
 import { createRaspberryGpioLed } from './lib/raspberry-gpio-led.ts';
 import { blinkLedsOnce } from './lib/blink-leds-once.ts';
+import { playChime } from './lib/chime.ts';
 import {
   reportAlsaCaptureDevice,
   reportAlsaPlaybackDevice,
@@ -93,9 +94,19 @@ const pendingInboundOggs: string[] = [];
 /** Kept on disk after playing so the play button can repeat it as many times as wanted. */
 let lastPlayedOgg: string | undefined;
 
-/** Used when a family voice arrives or after play drains the queue. */
+let unheardAudio = false;
+
+/**
+ * Used when a family voice arrives or after play drains the queue.
+ * The chime only sounds on the off → on edge, and not while recording: `aplay`
+ * would bleed into the message the child is speaking.
+ */
 function setUnheardAudio(pending: boolean): void {
+  const turnedOn = pending && !unheardAudio;
+  unheardAudio = pending;
   playLed.set(pending);
+
+  if (turnedOn && !isRecording) void playChime(audio);
 }
 
 /** Used in `onPlayLast` to forget a repeat whose file is no longer on disk. */
