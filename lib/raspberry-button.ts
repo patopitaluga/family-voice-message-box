@@ -7,6 +7,13 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { gpiomonWatchArgs } from './gpiod-cli.ts';
 import type { HoldToTalkHandlers, StopListening } from './hold-to-talk.ts';
 
+/**
+ * Used in `watchActiveLowButton`.
+ * Cheap switches chatter for a few milliseconds while held; releases shorter
+ * than this are ignored so the play LED does not flicker under the finger.
+ */
+const BUTTON_HOLD_DEBOUNCE_MS = 80;
+
 /** Used in `listenToRaspberryButtons`. */
 export type RaspberryButtonLines = {
   chip?: string;
@@ -15,6 +22,48 @@ export type RaspberryButtonLines = {
   /** BCM line for play-last press (default 22, or `GPIO_PLAY_BUTTON`). */
   playButton?: number;
 };
+
+/**
+ * Used in `watchActiveLowButton`.
+ * Press is forwarded immediately; a release only sticks if it lasts `settleMs`
+ * without another press, so bounce gaps do not flicker the LED or retrigger handlers.
+ */
+function ignoreBriefReleases(
+  settleMs: number,
+  emit: (pressed: boolean) => void,
+): { next: (pressed: boolean) => void; cancel: () => void } {
+  let held = false;
+  let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+
+  return {
+    next(pressed: boolean) {
+      if (pressed) {
+        if (releaseTimer !== undefined) {
+          clearTimeout(releaseTimer);
+          releaseTimer = undefined;
+        }
+        if (!held) {
+          held = true;
+          emit(true);
+        }
+        return;
+      }
+
+      if (!held || releaseTimer !== undefined) return;
+
+      releaseTimer = setTimeout(() => {
+        releaseTimer = undefined;
+        held = false;
+        emit(false);
+      }, settleMs);
+    },
+    cancel() {
+      if (releaseTimer === undefined) return;
+      clearTimeout(releaseTimer);
+      releaseTimer = undefined;
+    },
+  };
+}
 
 /**
  * Used in `listenToRaspberryButtons`.
@@ -26,12 +75,29 @@ function watchActiveLowButton(
   handlers: {
     onPress?: () => void | Promise<void>;
     onRelease?: () => void | Promise<void>;
-    /** Runs on every edge, before the busy gate, so LED feedback is never dropped. */
+    /** Runs on every settled edge, before the busy gate, so LED feedback is never dropped. */
     onEdge?: (pressed: boolean) => void;
   },
 ): StopListening {
   if (!Number.isInteger(line) || line < 0) throw new Error(`Invalid GPIO button line: ${String(line)}`);
 
+  let busy = false;
+  const debounce = ignoreBriefReleases(BUTTON_HOLD_DEBOUNCE_MS, (pressed) => {
+    handlers.onEdge?.(pressed);
+
+    const run = pressed ? handlers.onPress : handlers.onRelease;
+    if (run === undefined) return;
+    if (busy) return;
+
+    busy = true;
+    void Promise.resolve(run())
+      .catch((error: unknown) => {
+        console.error(error);
+      })
+      .finally(() => {
+        busy = false;
+      });
+  });
 
   let child: ChildProcess;
   try {
@@ -45,7 +111,6 @@ function watchActiveLowButton(
     );
   }
 
-  let busy = false;
   let stderr = '';
 
   child.stderr?.setEncoding('utf8');
@@ -77,26 +142,13 @@ function watchActiveLowButton(
       const released = edge === '1' || edge === 'rising';
       if (!pressed && !released) continue;
 
-      handlers.onEdge?.(pressed);
-
-      const run = pressed ? handlers.onPress : handlers.onRelease;
-      if (run === undefined) continue;
-      if (busy) continue;
-
-      busy = true;
-      void Promise.resolve(run())
-        .catch((error: unknown) => {
-          console.error(error);
-        })
-        .finally(() => {
-          busy = false;
-        });
+      debounce.next(pressed);
     }
   });
 
   return () => {
+    debounce.cancel();
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
-
   };
 }
 
