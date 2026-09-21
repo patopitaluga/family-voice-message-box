@@ -279,7 +279,7 @@ Hay dos niveles distintos y conviene no confundirlos.
 
 El **mezclador de ALSA** es la ganancia fija del hardware, y es la causa habitual de que todo suene bajo: muchas placas USB vienen de fábrica cerca de 0 %. Es lo que reporta el arranque. Se ajusta con `alsamixer -c N` —**F4** para las entradas, **F3** para las salidas— y se persiste con `sudo alsactl store`, si no se pierde al reiniciar. La HDMI nunca puede ser la culpable de una grabación baja: `/proc/asound/pcm` en captura no lista las salidas de la Pi (jack y HDMI).
 
-La **normalización por software** es lo que hace este proyecto con ffmpeg en cada audio, porque el mezclador es un valor fijo y el niño habla a distinta distancia cada vez. Al enviar aplica `speechnorm`, que nivela la voz; al reproducir aplica `loudnorm` a −14 LUFS, para que las notas de voz de la familia lleguen todas al mismo volumen. Si tu ffmpeg no trae alguno de esos filtros, avisa en el log y sigue sin normalizar. Para desactivarlo, `AUDIO_NORMALIZE=off` en `.env`.
+La **normalización por software** es lo que hace este proyecto con ffmpeg en cada audio, porque el mezclador es un valor fijo y el niño habla a distinta distancia cada vez. Al enviar aplica `speechnorm` sobre el clip ya grabado (no en vivo, para no comerse las primeras palabras); al reproducir aplica `loudnorm` a −14 LUFS, para que las notas de voz de la familia lleguen todas al mismo volumen. Si tu ffmpeg no trae alguno de esos filtros, avisa en el log y sigue sin normalizar. Para desactivarlo, `AUDIO_NORMALIZE=off` en `.env`.
 
 Súbelo primero en el mezclador y deja la normalización para lo que el mezclador no puede arreglar. Normalizar una señal muy débil amplifica también el ruido de fondo.
 

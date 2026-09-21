@@ -10,7 +10,6 @@ import {
 import {
   isMissingFilter,
   playbackFilterArgs,
-  speechNormalizeArgs,
 } from './audio-normalize.ts';
 import {
   isMissingLibopus,
@@ -147,8 +146,36 @@ async function pickPlaybackDevice(): Promise<string | undefined> {
  */
 const OPUS_RATE = 48000;
 
+/**
+ * Used in `ffmpegRecordArgs` and `primeAlsaCapture`.
+ * Skip ffmpeg's default 5 s probe: that is what ate the first words on ALSA.
+ */
+const ALSA_LOW_LATENCY_INPUT = [
+  '-fflags',
+  'nobuffer',
+  '-flags',
+  'low_delay',
+  '-probesize',
+  '32',
+  '-analyzeduration',
+  '0',
+];
+
 /** Used in `pickCaptureRate`, keyed by ALSA device. */
 const rateByDevice = new Map<string, number>();
+
+/**
+ * Used in `resolveCaptureDevice` and `startRecording`.
+ * Filled by `primeAlsaCapture` so the first press does not wait on `/proc`.
+ */
+let cachedCaptureDevice: string | undefined;
+
+/** Used in `primeAlsaCapture` and `createRaspberryAudioControl`. */
+async function resolveCaptureDevice(): Promise<string> {
+  if (cachedCaptureDevice !== undefined) return cachedCaptureDevice;
+  cachedCaptureDevice = (await pickCaptureDevice()) ?? 'default';
+  return cachedCaptureDevice;
+}
 
 /**
  * Used in `probeCaptureRate`.
@@ -224,6 +251,43 @@ async function probeCaptureRate(device: string): Promise<number | undefined> {
     return chooseCaptureRate(parseUsbCaptureRates(dump));
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Used in `index.ts` after `reportAlsaCaptureDevice`.
+ * Opens the USB mic once so the first button press does not pay ALSA's cold start,
+ * and caches device + rate for `startRecording`.
+ */
+export async function primeAlsaCapture(): Promise<void> {
+  const device = await resolveCaptureDevice();
+  const rate = await pickCaptureRate(device);
+  try {
+    await runAudioCommand('ffmpeg', [
+      '-nostdin',
+      '-y',
+      '-loglevel',
+      'error',
+      ...ALSA_LOW_LATENCY_INPUT,
+      '-f',
+      'alsa',
+      '-ac',
+      '1',
+      '-ar',
+      String(rate),
+      '-i',
+      device,
+      '-t',
+      '0.05',
+      '-f',
+      'null',
+      '-',
+    ]);
+  } catch (error: unknown) {
+    console.warn(
+      'No se pudo preparar el micrófono al arrancar; la primera grabación puede tardar un poco más.',
+      error,
+    );
   }
 }
 
@@ -380,18 +444,19 @@ export async function reportAlsaPlaybackDevice(): Promise<void> {
 /**
  * Used in `startFfmpegRecording`.
  * ALSA input at `rate`, then Opus at 48 kHz so any resample happens inside ffmpeg.
+ * No live `speechnorm`: it ramps gain and swallows the start of the sentence.
  */
 function ffmpegRecordArgs(
   outputPath: string,
   device: string,
   rate: number,
-  filterArgs: string[],
   encoderArgs: string[],
 ): string[] {
   return [
     '-y',
     '-loglevel',
     'error',
+    ...ALSA_LOW_LATENCY_INPUT,
     '-f',
     'alsa',
     '-thread_queue_size',
@@ -402,12 +467,13 @@ function ffmpegRecordArgs(
     String(rate),
     '-i',
     device,
-    ...filterArgs,
     ...encoderArgs,
     '-ac',
     '1',
     '-ar',
     String(OPUS_RATE),
+    '-flush_packets',
+    '1',
     outputPath,
   ];
 }
@@ -433,7 +499,7 @@ function ffmpegPlayArgs(
 
 /**
  * Used in `startFfmpegRecording`.
- * ffmpeg rejects a bad encoder/filter immediately; after this window it is capturing.
+ * ffmpeg rejects a bad encoder immediately; after this window it is capturing.
  */
 function waitUntilRecordingStarted(
   child: ChildProcess,
@@ -443,7 +509,7 @@ function waitUntilRecordingStarted(
     const timer = setTimeout(() => {
       cleanup();
       resolve();
-    }, 400);
+    }, 80);
 
     const onSpawnError = (error: Error): void => {
       cleanup();
@@ -487,28 +553,25 @@ function waitUntilRecordingStarted(
 
 /**
  * Used in `createRaspberryAudioControl`.
- * Retries once without `speechnorm` / with native `opus` if this ffmpeg build lacks them.
+ * Retries with native `opus` if this ffmpeg build lacks `libopus`.
  */
 async function startFfmpegRecording(
   outputPath: string,
   device: string,
   rate: number,
-  filterArgs: string[],
   encoderArgs: string[],
 ): Promise<{
   child: ChildProcess;
   stderr: () => string;
-  filterArgs: string[];
   encoderArgs: string[];
 }> {
-  let nextFilter = filterArgs;
   let nextEncoder = encoderArgs;
 
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
     let recordingStderr = '';
     const child = startAudioProcess(
       'ffmpeg',
-      ffmpegRecordArgs(outputPath, device, rate, nextFilter, nextEncoder),
+      ffmpegRecordArgs(outputPath, device, rate, nextEncoder),
       { stdin: true },
     );
 
@@ -522,18 +585,9 @@ async function startFfmpegRecording(
       return {
         child,
         stderr: () => recordingStderr,
-        filterArgs: nextFilter,
         encoderArgs: nextEncoder,
       };
     } catch (error: unknown) {
-      if (nextFilter.length > 0 && isMissingFilter(error)) {
-        console.warn(
-          'Este ffmpeg no tiene `speechnorm`: se graba sin normalizar el volumen.',
-        );
-        nextFilter = [];
-        continue;
-      }
-
       if (nextEncoder.includes('libopus') && isMissingLibopus(error)) {
         nextEncoder = nativeOpusEncoderArgs();
         continue;
@@ -583,7 +637,6 @@ async function playAlsa(
  */
 export function createRaspberryAudioControl(): AudioControl {
   let recording: ChildProcess | undefined;
-  let recordFilterArgs: string[] | undefined;
   let recordEncoderArgs: string[] | undefined;
   let loggedPlayback = false;
 
@@ -593,17 +646,15 @@ export function createRaspberryAudioControl(): AudioControl {
     async startRecording(outputPath: string): Promise<void> {
       if (recording) throw new Error('Recording already in progress');
 
-      const device = (await pickCaptureDevice()) ?? 'default';
-      const rate = await pickCaptureRate(device);
+      const device = await resolveCaptureDevice();
+      const rate = rateByDevice.get(device) ?? (await pickCaptureRate(device));
       const started = await startFfmpegRecording(
         outputPath,
         device,
         rate,
-        recordFilterArgs ?? speechNormalizeArgs(),
         recordEncoderArgs ?? libopusEncoderArgs(),
       );
 
-      recordFilterArgs = started.filterArgs;
       recordEncoderArgs = started.encoderArgs;
       const child = started.child;
       recording = child;

@@ -130,6 +130,7 @@ export async function listenToLinuxKeyboard(
     }
 
     if (ev.code !== KEY_SPACE) return;
+    handlers.onRecordHeld?.(true);
     if (held || playInFlight) return;
 
     held = true;
@@ -154,6 +155,7 @@ export async function listenToLinuxKeyboard(
     }
 
     if (ev.code !== KEY_SPACE) return;
+    handlers.onRecordHeld?.(false);
     if (!held) return;
 
     if (pressInFlight) {

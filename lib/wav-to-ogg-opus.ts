@@ -38,6 +38,32 @@ async function encodeOpus(
 }
 
 /**
+ * Used in `index.ts` after a Pi recording.
+ * Live capture skips `speechnorm` so the first words are not ramped away;
+ * this pass sees the whole clip.
+ */
+export async function normalizeRecordedOpus(
+  oggPath: string,
+  outPath: string,
+): Promise<string> {
+  const filterArgs = speechNormalizeArgs();
+  if (filterArgs.length === 0) return oggPath;
+
+  try {
+    await encodeOpus(oggPath, outPath, filterArgs);
+  } catch (error: unknown) {
+    if (!isMissingFilter(error)) throw error;
+
+    console.warn(
+      'Este ffmpeg no tiene `speechnorm`: se envía sin normalizar el volumen.',
+    );
+    return oggPath;
+  }
+
+  return outPath;
+}
+
+/**
  * Used in `index.ts` on Mac (`start:dev`). The Pi records OGG/Opus directly.
  * Writes an OGG/Opus file next to the WAV (or to `oggPath` when provided).
  */

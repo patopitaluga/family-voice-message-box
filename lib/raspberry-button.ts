@@ -75,19 +75,28 @@ function watchActiveLowButton(
   handlers: {
     onPress?: () => void | Promise<void>;
     onRelease?: () => void | Promise<void>;
-    /** Runs on every settled edge, before the busy gate, so LED feedback is never dropped. */
+    /** Press is raw (LED now); release is settled. Always before the busy gate. */
     onEdge?: (pressed: boolean) => void;
   },
 ): StopListening {
   if (!Number.isInteger(line) || line < 0) throw new Error(`Invalid GPIO button line: ${String(line)}`);
 
   let busy = false;
-  const debounce = ignoreBriefReleases(BUTTON_HOLD_DEBOUNCE_MS, (pressed) => {
-    handlers.onEdge?.(pressed);
+  let queued: boolean | undefined;
+
+  /**
+   * Used from the debounce and the busy-queue flush.
+   * LED-off is debounced with the release; LED-on is already fired on the raw press.
+   */
+  const runSettled = (pressed: boolean): void => {
+    if (!pressed) handlers.onEdge?.(false);
 
     const run = pressed ? handlers.onPress : handlers.onRelease;
     if (run === undefined) return;
-    if (busy) return;
+    if (busy) {
+      queued = pressed;
+      return;
+    }
 
     busy = true;
     void Promise.resolve(run())
@@ -96,8 +105,14 @@ function watchActiveLowButton(
       })
       .finally(() => {
         busy = false;
+        if (queued === undefined) return;
+        const next = queued;
+        queued = undefined;
+        runSettled(next);
       });
-  });
+  };
+
+  const debounce = ignoreBriefReleases(BUTTON_HOLD_DEBOUNCE_MS, runSettled);
 
   let child: ChildProcess;
   try {
@@ -142,6 +157,7 @@ function watchActiveLowButton(
       const released = edge === '1' || edge === 'rising';
       if (!pressed && !released) continue;
 
+      if (pressed) handlers.onEdge?.(true);
       debounce.next(pressed);
     }
   });
@@ -182,6 +198,7 @@ export function listenToRaspberryButtons(
   const stopRecord = watchActiveLowButton(chip, recordButton, {
     onPress: handlers.onPress,
     onRelease: handlers.onRelease,
+    onEdge: handlers.onRecordHeld,
   });
 
   const stopPlay = watchActiveLowButton(chip, playButton, {

@@ -69,6 +69,7 @@ export function listenToTerminalKeys(
 
   const finishRelease = (): void => {
     held = false;
+    handlers.onRecordHeld?.(false);
     void Promise.resolve(handlers.onRelease()).catch((error: unknown) => {
       console.error(error);
     });
@@ -127,6 +128,7 @@ export function listenToTerminalKeys(
       if (!held) {
         held = true;
         pressInFlight = true;
+        handlers.onRecordHeld?.(true);
         armRelease(FIRST_REPEAT_GRACE_MS);
         void Promise.resolve(handlers.onPress())
           .catch((error: unknown) => {

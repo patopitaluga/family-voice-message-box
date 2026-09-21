@@ -5,7 +5,10 @@ import {
   parseRunMode,
 } from './lib/create-audio-control.ts';
 import { convertOggOpusToWav } from './lib/ogg-opus-to-wav.ts';
-import { convertWavToOggOpus } from './lib/wav-to-ogg-opus.ts';
+import {
+  convertWavToOggOpus,
+  normalizeRecordedOpus,
+} from './lib/wav-to-ogg-opus.ts';
 import { listenToMacSpacebar } from './lib/mac-spacebar.ts';
 import { listenToRaspberryButtons } from './lib/raspberry-button.ts';
 import type { StopListening } from './lib/hold-to-talk.ts';
@@ -16,6 +19,7 @@ import { blinkLedsOnce } from './lib/blink-leds-once.ts';
 import { playChime } from './lib/chime.ts';
 import { installColoredConsole } from './lib/colored-console.ts';
 import {
+  primeAlsaCapture,
   reportAlsaCaptureDevice,
   reportAlsaPlaybackDevice,
 } from './lib/raspberry-audio.ts';
@@ -134,6 +138,10 @@ async function fileExists(filePath: string): Promise<boolean> {
 }
 
 const handlers = {
+  onRecordHeld(pressed: boolean) {
+    recordLed.set(pressed);
+  },
+
   async onPress() {
     if (isRecording) return;
 
@@ -141,11 +149,9 @@ const handlers = {
       `out-${String(Date.now())}.${platform === 'raspberry' ? 'ogg' : 'wav'}`,
     );
     console.log('Grabando…');
-    recordLed.set(true);
     try {
       await audio.startRecording(currentRecordingPath);
     } catch (error: unknown) {
-      recordLed.set(false);
       currentRecordingPath = undefined;
       throw error;
     }
@@ -158,7 +164,6 @@ const handlers = {
 
     isRecording = false;
     await audio.stopRecording();
-    recordLed.set(false);
 
     const recordedPath = currentRecordingPath;
     const startedAt = recordingStartedAt;
@@ -223,7 +228,13 @@ const handlers = {
           tempPath(`out-${String(Date.now())}.ogg`),
         );
         await unlink(recordedPath).catch(() => undefined);
-      } else oggPath = recordedPath;
+      } else {
+        oggPath = await normalizeRecordedOpus(
+          recordedPath,
+          tempPath(`out-${String(Date.now())}.ogg`),
+        );
+        if (oggPath !== recordedPath) await unlink(recordedPath).catch(() => undefined);
+      }
 
       if (oggPath === undefined) return;
 
@@ -339,6 +350,7 @@ console.log(
 if (platform === 'raspberry') {
   await reportAlsaCaptureDevice();
   await reportAlsaPlaybackDevice();
+  await primeAlsaCapture();
 }
 
 if (platform === 'mac') console.log(

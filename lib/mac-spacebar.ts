@@ -69,6 +69,7 @@ export async function listenToMacSpacebar(
     if (event.name !== 'SPACE') return;
 
     if (event.state === 'DOWN') {
+      handlers.onRecordHeld?.(true);
       if (held || playInFlight) return;
 
       held = true;
@@ -93,6 +94,7 @@ export async function listenToMacSpacebar(
     }
 
     if (event.state === 'UP') {
+      handlers.onRecordHeld?.(false);
       if (!held) return;
 
       if (pressInFlight) {

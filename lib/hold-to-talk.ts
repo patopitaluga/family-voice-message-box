@@ -8,6 +8,11 @@ export type HoldToTalkHandlers = {
   onRelease: () => void | Promise<void>;
   onPlayLast?: () => void | Promise<void>;
   /**
+   * Both edges of the record button, for lighting its LED while held.
+   * Synchronous and never queued: the LED follows the finger, not ffmpeg.
+   */
+  onRecordHeld?: (pressed: boolean) => void;
+  /**
    * Both edges of the play button, for lighting its LED while held.
    * Synchronous and never queued: the LED must follow the finger, not the audio.
    */

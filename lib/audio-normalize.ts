@@ -23,7 +23,7 @@ function filterArgs(filter: string): string[] {
   return normalizeDisabled() ? [] : ['-af', filter];
 }
 
-/** Used in `wav-to-ogg-opus.ts` and `raspberry-audio.ts` for outbound recordings. */
+/** Used in `wav-to-ogg-opus.ts` for outbound recordings. */
 export function speechNormalizeArgs(): string[] {
   return filterArgs(SPEECH_FILTER);
 }
