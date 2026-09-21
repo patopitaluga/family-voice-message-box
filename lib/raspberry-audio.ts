@@ -1,15 +1,29 @@
+import { readFile } from 'node:fs/promises';
 import { execFile, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { AudioControl } from './type-audio-control.ts';
+import type { AudioControl, PlayAudioOptions } from './type-audio-control.ts';
 import {
-  runAudioCommand,
   startAudioProcess,
   stopAudioProcess,
+  runAudioCommand,
 } from './run-audio-command.ts';
+import {
+  isMissingFilter,
+  playbackFilterArgs,
+  speechNormalizeArgs,
+} from './audio-normalize.ts';
+import {
+  isMissingLibopus,
+  libopusEncoderArgs,
+  nativeOpusEncoderArgs,
+} from './wav-to-ogg-opus.ts';
 
 const execFileAsync = promisify(execFile);
 
-/** Used in `parseAlsaHwCards`, `preferUsbCaptureCard` and `preferPlaybackCard`. */
+/** Used in `listAlsaHwCards`. Capture and playback devices on Linux. */
+const PROC_PCM = '/proc/asound/pcm';
+
+/** Used in `parseProcAsoundPcm`, `preferUsbCaptureCard` and `preferPlaybackCard`. */
 type AlsaHwCard = {
   card: number;
   device: number;
@@ -19,20 +33,24 @@ type AlsaHwCard = {
 
 /**
  * Used in `listAlsaHwCards`.
- * Parses `arecord -l` / `aplay -l` lines like `card 1: Headset [USB Headphones], device 0:`.
+ * Parses `/proc/asound/pcm` lines like `01-00: USB Audio : USB Audio : playback 1 : capture 1`.
  */
-function parseAlsaHwCards(listing: string): AlsaHwCard[] {
+function parseProcAsoundPcm(
+  listing: string,
+  role: 'capture' | 'playback',
+): AlsaHwCard[] {
   const cards: AlsaHwCard[] = [];
-  const pattern =
-    /^card\s+(\d+):\s+(\S+)\s+\[([^\]]*)\],\s+device\s+(\d+):/gm;
+  const pattern = /^(\d+)-(\d+):\s+(.+?)\s+:\s+(.+?)\s+:\s+(.+)$/gm;
   let match = pattern.exec(listing);
   while (match !== null) {
-    cards.push({
-      card: Number(match[1]),
-      device: Number(match[4]),
-      id: match[2],
-      name: match[3],
-    });
+    const flags = match[5].toLowerCase();
+    if (flags.includes(role)) cards.push({
+        card: Number(match[1]),
+        device: Number(match[2]),
+        id: match[3],
+        name: match[4],
+      });
+
     match = pattern.exec(listing);
   }
 
@@ -42,18 +60,11 @@ function parseAlsaHwCards(listing: string): AlsaHwCard[] {
 /**
  * Used in `reportAlsaCaptureDevice`, `pickCaptureDevice` and `pickPlaybackDevice`.
  */
-async function listAlsaHwCards(tool: 'arecord' | 'aplay'): Promise<AlsaHwCard[]> {
-  try {
-    const result = await execFileAsync(tool, ['-l'], {
-      encoding: 'utf8',
-      timeout: 5000,
-    });
-    return parseAlsaHwCards(result.stdout);
-  } catch (error: unknown) {
-    if (error && typeof error === 'object' && 'stdout' in error) return parseAlsaHwCards(String((error as { stdout?: string }).stdout ?? ''));
-
-    throw error;
-  }
+async function listAlsaHwCards(
+  role: 'capture' | 'playback',
+): Promise<AlsaHwCard[]> {
+  const listing = await readFile(PROC_PCM, 'utf8');
+  return parseProcAsoundPcm(listing, role);
 }
 
 /** Used in `preferUsbCaptureCard` and `reportAlsaCaptureDevice`. */
@@ -112,7 +123,7 @@ async function pickCaptureDevice(): Promise<string | undefined> {
   const env = process.env.ALSA_DEVICE?.trim();
   if (env !== undefined && env !== '') return env;
 
-  const hw = preferUsbCaptureCard(await listAlsaHwCards('arecord'));
+  const hw = preferUsbCaptureCard(await listAlsaHwCards('capture'));
   if (hw === undefined) return undefined;
   return alsaPlughw(hw);
 }
@@ -124,7 +135,7 @@ async function pickPlaybackDevice(): Promise<string | undefined> {
   )?.trim();
   if (env !== undefined && env !== '') return env;
 
-  const hw = preferPlaybackCard(await listAlsaHwCards('aplay'));
+  const hw = preferPlaybackCard(await listAlsaHwCards('playback'));
   if (hw === undefined) return undefined;
   return alsaPlughw(hw);
 }
@@ -136,31 +147,39 @@ async function pickPlaybackDevice(): Promise<string | undefined> {
  */
 const OPUS_RATE = 48000;
 
-/** Used in `pickCaptureRate`, keyed by ALSA device: probing spawns `arecord`. */
+/** Used in `pickCaptureRate`, keyed by ALSA device. */
 const rateByDevice = new Map<string, number>();
 
 /**
- * Used in `pickCaptureRate`.
- * `--dump-hw-params` only tells the truth about a raw `hw:` device: `plughw`
- * claims to accept everything because it converts in software.
+ * Used in `probeCaptureRate`.
+ * `plughw:1,0` / `hw:1,0` → card 1, so we can read that card's USB stream info.
  */
-function rawHwDevice(device: string): string | undefined {
-  if (device.startsWith('plughw:')) return device.replace(/^plughw:/, 'hw:');
-  if (device.startsWith('hw:')) return device;
-
-  return undefined;
+function alsaCardNumber(device: string): number | undefined {
+  const match = /^(?:plug)?hw:(\d+)/i.exec(device);
+  if (match === null) return undefined;
+  return Number(match[1]);
 }
 
 /**
  * Used in `chooseCaptureRate`.
- * The `RATE:` line comes either as a range (`RATE: [8000 48000]`) or as a list
- * of discrete values, so we just collect every number on it.
+ * USB `/proc/asound/cardN/stream0` uses `Rates: 8000, 48000`; collect every number
+ * on a RATE line in the Capture section when present.
  */
 function parseHwRates(dump: string): number[] {
-  const line = /^RATE:.*$/m.exec(dump);
-  if (line === null) return [];
+  const rates: number[] = [];
+  for (const line of dump.split('\n')) {
+    if (!/RATE/i.test(line)) continue;
+    for (const match of line.matchAll(/\d+/g)) rates.push(Number(match[0]));
+  }
 
-  return [...line[0].matchAll(/\d+/g)].map((match) => Number(match[0]));
+  return rates;
+}
+
+/** Used in `probeCaptureRate`. */
+function parseUsbCaptureRates(dump: string): number[] {
+  const capture = dump.split(/^Capture:\s*$/m)[1];
+  if (capture === undefined) return parseHwRates(dump);
+  return parseHwRates(capture);
 }
 
 /** Used in `pickCaptureRate`. */
@@ -192,33 +211,20 @@ export async function pickCaptureRate(device: string): Promise<number> {
   return rate;
 }
 
-/**
- * Used in `probeCaptureRate`.
- * `--dump-hw-params` prints to stderr and exits non-zero by design, so the
- * failure path is the normal one and its output still has to be read.
- */
-async function dumpHwParams(hw: string): Promise<string> {
-  try {
-    const { stdout, stderr } = await execFileAsync(
-      'arecord',
-      ['-D', hw, '--dump-hw-params', '-d', '1', '/dev/null'],
-      { encoding: 'utf8', timeout: 5000 },
-    );
-    return `${stdout}${stderr}`;
-  } catch (error: unknown) {
-    if (error === null || typeof error !== 'object') return '';
-
-    const spawned = error as { stdout?: string; stderr?: string };
-    return `${spawned.stdout ?? ''}${spawned.stderr ?? ''}`;
-  }
-}
-
 /** Used in `pickCaptureRate`. */
 async function probeCaptureRate(device: string): Promise<number | undefined> {
-  const hw = rawHwDevice(device);
-  if (hw === undefined) return undefined;
+  const card = alsaCardNumber(device);
+  if (card === undefined) return undefined;
 
-  return chooseCaptureRate(parseHwRates(await dumpHwParams(hw)));
+  try {
+    const dump = await readFile(
+      `/proc/asound/card${String(card)}/stream0`,
+      'utf8',
+    );
+    return chooseCaptureRate(parseUsbCaptureRates(dump));
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -280,28 +286,21 @@ async function captureRateLine(device: string): Promise<string> {
 
 /**
  * Used in `index.ts` on `npm start`, printed as part of the startup banner.
- * `arecord -l` only lists capture cards, so HDMI and the Pi jack never appear here.
+ * `/proc/asound/pcm` capture lines only; HDMI and the Pi jack never appear here.
  * ALSA `default` is often `pcm_asym` (playback, no capture slave) — we pick a USB `plughw`.
  */
 export async function reportAlsaCaptureDevice(): Promise<void> {
   let cards: AlsaHwCard[];
   try {
-    cards = await listAlsaHwCards('arecord');
+    cards = await listAlsaHwCards('capture');
   } catch (error: unknown) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      console.warn(
-        'Micrófono: no se encontró `arecord`. Instala alsa-utils: sudo apt install -y alsa-utils',
-      );
-      return;
-    }
-
-    console.warn('Micrófono: no se pudo listar la captura (`arecord -l`).', error);
+    console.warn('Micrófono: no se pudo listar la captura (`/proc/asound/pcm`).', error);
     return;
   }
 
   if (cards.length === 0) {
     console.warn(
-      'Micrófono: ninguno. `arecord -l` está vacío y el jack de la Pi no tiene entrada. ' +
+      'Micrófono: ninguno. `/proc/asound/pcm` no lista entradas y el jack de la Pi no tiene. ' +
         'Enchufa un micrófono USB y vuelve a ejecutar npm start.',
     );
     return;
@@ -319,7 +318,7 @@ export async function reportAlsaCaptureDevice(): Promise<void> {
   console.log(`Micrófono: ${describeAlsaCard(hw)}`);
 
   if (!isUsbCard(hw)) console.warn(
-      '  No parece un micrófono USB. Si enchufaste uno, comprueba que la Pi lo vea con `arecord -l`.',
+      '  No parece un micrófono USB. Si enchufaste uno, comprueba que aparezca en `/proc/asound/pcm`.',
     );
 
   const others = cards.filter((card) => card !== hw);
@@ -343,13 +342,13 @@ export async function reportAlsaCaptureDevice(): Promise<void> {
 export async function reportAlsaPlaybackDevice(): Promise<void> {
   let cards: AlsaHwCard[];
   try {
-    cards = await listAlsaHwCards('aplay');
+    cards = await listAlsaHwCards('playback');
   } catch {
     return;
   }
 
   if (cards.length === 0) {
-    console.warn('Parlante: ninguno (`aplay -l` está vacío).');
+    console.warn('Parlante: ninguno (`/proc/asound/pcm` no lista salidas).');
     return;
   }
 
@@ -379,18 +378,204 @@ export async function reportAlsaPlaybackDevice(): Promise<void> {
 }
 
 /**
- * Used in `createRaspberryAudioControl`.
+ * Used in `startFfmpegRecording`.
+ * ALSA input at `rate`, then Opus at 48 kHz so any resample happens inside ffmpeg.
  */
-function arecordArgs(
+function ffmpegRecordArgs(
   outputPath: string,
-  device: string | undefined,
+  device: string,
   rate: number,
+  filterArgs: string[],
+  encoderArgs: string[],
 ): string[] {
-  const args = ['-f', 'S16_LE', '-r', String(rate), '-c', '1'];
-  if (device !== undefined && device !== '') args.push('-D', device);
+  return [
+    '-y',
+    '-loglevel',
+    'error',
+    '-f',
+    'alsa',
+    '-thread_queue_size',
+    '1024',
+    '-ac',
+    '1',
+    '-ar',
+    String(rate),
+    '-i',
+    device,
+    ...filterArgs,
+    ...encoderArgs,
+    '-ac',
+    '1',
+    '-ar',
+    String(OPUS_RATE),
+    outputPath,
+  ];
+}
 
-  args.push('-t', 'wav', outputPath);
-  return args;
+/** Used in `playAlsa`. */
+function ffmpegPlayArgs(
+  filePath: string,
+  device: string,
+  filterArgs: string[],
+): string[] {
+  return [
+    '-nostdin',
+    '-loglevel',
+    'error',
+    '-i',
+    filePath,
+    ...filterArgs,
+    '-f',
+    'alsa',
+    device,
+  ];
+}
+
+/**
+ * Used in `startFfmpegRecording`.
+ * ffmpeg rejects a bad encoder/filter immediately; after this window it is capturing.
+ */
+function waitUntilRecordingStarted(
+  child: ChildProcess,
+  getStderr: () => string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, 400);
+
+    const onSpawnError = (error: Error): void => {
+      cleanup();
+      reject(
+        new Error(`Could not start ffmpeg. Is ffmpeg installed?`, {
+          cause: error,
+        }),
+      );
+    };
+
+    const onExit = (
+      code: number | null,
+      signal: NodeJS.Signals | null,
+    ): void => {
+      cleanup();
+      if (signal !== null) {
+        resolve();
+        return;
+      }
+
+      const details = getStderr().trim();
+      reject(
+        new Error(
+          details.length > 0
+            ? `ffmpeg failed to start recording: ${details}`
+            : `ffmpeg failed to start recording (code=${String(code)}). Enchufa un micrófono USB o pon ALSA_DEVICE en .env`,
+        ),
+      );
+    };
+
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      child.off('exit', onExit);
+      child.off('error', onSpawnError);
+    };
+
+    child.once('exit', onExit);
+    child.once('error', onSpawnError);
+  });
+}
+
+/**
+ * Used in `createRaspberryAudioControl`.
+ * Retries once without `speechnorm` / with native `opus` if this ffmpeg build lacks them.
+ */
+async function startFfmpegRecording(
+  outputPath: string,
+  device: string,
+  rate: number,
+  filterArgs: string[],
+  encoderArgs: string[],
+): Promise<{
+  child: ChildProcess;
+  stderr: () => string;
+  filterArgs: string[];
+  encoderArgs: string[];
+}> {
+  let nextFilter = filterArgs;
+  let nextEncoder = encoderArgs;
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    let recordingStderr = '';
+    const child = startAudioProcess(
+      'ffmpeg',
+      ffmpegRecordArgs(outputPath, device, rate, nextFilter, nextEncoder),
+      { stdin: true },
+    );
+
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (chunk: string) => {
+      recordingStderr += chunk;
+    });
+
+    try {
+      await waitUntilRecordingStarted(child, () => recordingStderr);
+      return {
+        child,
+        stderr: () => recordingStderr,
+        filterArgs: nextFilter,
+        encoderArgs: nextEncoder,
+      };
+    } catch (error: unknown) {
+      if (nextFilter.length > 0 && isMissingFilter(error)) {
+        console.warn(
+          'Este ffmpeg no tiene `speechnorm`: se graba sin normalizar el volumen.',
+        );
+        nextFilter = [];
+        continue;
+      }
+
+      if (nextEncoder.includes('libopus') && isMissingLibopus(error)) {
+        nextEncoder = nativeOpusEncoderArgs();
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new Error('Could not start ffmpeg recording');
+}
+
+/**
+ * Used in `createRaspberryAudioControl`.
+ * On a build without `loudnorm` it retries keeping any fixed gain, which is the
+ * part a quiet asset like the chime actually depends on to be heard.
+ */
+async function playAlsa(
+  filePath: string,
+  device: string,
+  options?: PlayAudioOptions,
+): Promise<void> {
+  try {
+    await runAudioCommand(
+      'ffmpeg',
+      ffmpegPlayArgs(filePath, device, playbackFilterArgs(options)),
+    );
+  } catch (error: unknown) {
+    if (options?.normalizePlayback !== true || !isMissingFilter(error)) throw error;
+
+    console.warn(
+      'Este ffmpeg no tiene `loudnorm`: se reproduce sin normalizar el volumen.',
+    );
+    await runAudioCommand(
+      'ffmpeg',
+      ffmpegPlayArgs(
+        filePath,
+        device,
+        playbackFilterArgs({ ...options, normalizePlayback: false }),
+      ),
+    );
+  }
 }
 
 /**
@@ -398,91 +583,47 @@ function arecordArgs(
  */
 export function createRaspberryAudioControl(): AudioControl {
   let recording: ChildProcess | undefined;
-  let recordingStderr = '';
+  let recordFilterArgs: string[] | undefined;
+  let recordEncoderArgs: string[] | undefined;
   let loggedPlayback = false;
 
   return {
-    name: 'raspberry (arecord / aplay)',
+    name: 'raspberry (ffmpeg / alsa)',
 
     async startRecording(outputPath: string): Promise<void> {
       if (recording) throw new Error('Recording already in progress');
 
-      const device = await pickCaptureDevice();
-      const rate = device === undefined ? OPUS_RATE : await pickCaptureRate(device);
-      recordingStderr = '';
-      const child = startAudioProcess(
-        'arecord',
-        arecordArgs(outputPath, device, rate),
+      const device = (await pickCaptureDevice()) ?? 'default';
+      const rate = await pickCaptureRate(device);
+      const started = await startFfmpegRecording(
+        outputPath,
+        device,
+        rate,
+        recordFilterArgs ?? speechNormalizeArgs(),
+        recordEncoderArgs ?? libopusEncoderArgs(),
       );
 
-      child.stderr?.setEncoding('utf8');
-      child.stderr?.on('data', (chunk: string) => {
-        recordingStderr += chunk;
-      });
-
+      recordFilterArgs = started.filterArgs;
+      recordEncoderArgs = started.encoderArgs;
+      const child = started.child;
       recording = child;
 
       child.once('exit', (code, signal) => {
         if (recording === child) recording = undefined;
 
         if (code !== 0 && code !== null && signal === null) {
-          const details = recordingStderr.trim();
+          const details = started.stderr().trim();
           console.error(
             details.length > 0
-              ? `arecord exited early: ${details}`
-              : `arecord exited early (code=${String(code)})`,
+              ? `ffmpeg exited early: ${details}`
+              : `ffmpeg exited early (code=${String(code)})`,
           );
         }
       });
 
       child.once('error', (error) => {
         if (recording === child) recording = undefined;
-        console.error('arecord failed to start. Is alsa-utils installed?', error);
-      });
-
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          cleanup();
-          resolve();
-        }, 400);
-
-        const onSpawnError = (error: Error): void => {
-          cleanup();
-          reject(
-            new Error(`Could not start arecord. Is alsa-utils installed?`, {
-              cause: error,
-            }),
-          );
-        };
-
-        const onExit = (
-          code: number | null,
-          signal: NodeJS.Signals | null,
-        ): void => {
-          cleanup();
-          if (signal !== null) {
-            resolve();
-            return;
-          }
-
-          const details = recordingStderr.trim();
-          reject(
-            new Error(
-              details.length > 0
-                ? `arecord failed to start recording: ${details}`
-                : `arecord failed to start recording (code=${String(code)}). Try: arecord -l`,
-            ),
-          );
-        };
-
-        const cleanup = (): void => {
-          clearTimeout(timer);
-          child.off('exit', onExit);
-          child.off('error', onSpawnError);
-        };
-
-        child.once('exit', onExit);
-        child.once('error', onSpawnError);
+        console.error('ffmpeg failed to start. Is ffmpeg installed?', error);
       });
     },
 
@@ -495,15 +636,14 @@ export function createRaspberryAudioControl(): AudioControl {
       await stopAudioProcess(child);
     },
 
-    async play(filePath: string): Promise<void> {
-      const device = await pickPlaybackDevice();
-      if (device !== undefined && !loggedPlayback) {
+    async play(filePath: string, options?: PlayAudioOptions): Promise<void> {
+      const device = (await pickPlaybackDevice()) ?? 'default';
+      if (device !== 'default' && !loggedPlayback) {
         loggedPlayback = true;
         console.log(`Reproducción ALSA: ${device}`);
       }
 
-      const args = device === undefined ? [filePath] : ['-D', device, filePath];
-      await runAudioCommand('aplay', args);
+      await playAlsa(filePath, device, options);
     },
   };
 }

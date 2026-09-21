@@ -1,10 +1,19 @@
 import type { ChildProcess } from 'node:child_process';
-import type { AudioControl } from './type-audio-control.ts';
+import type { AudioControl, PlayAudioOptions } from './type-audio-control.ts';
 import {
   runAudioCommand,
   startAudioProcess,
   stopAudioProcess,
 } from './run-audio-command.ts';
+
+/**
+ * Used in `createMacAudioControl`.
+ * `afplay -v` is a linear multiplier, not decibels, so the gain has to be converted.
+ */
+function afplayGainArgs(gainDb?: number): string[] {
+  if (gainDb === undefined || gainDb === 0) return [];
+  return ['-v', (10 ** (gainDb / 20)).toFixed(2)];
+}
 
 /**
  * Used in `create-audio-control.ts` for `npm run start:dev` on macOS.
@@ -106,8 +115,11 @@ export function createMacAudioControl(): AudioControl {
       await stopAudioProcess(child);
     },
 
-    async play(filePath: string): Promise<void> {
-      await runAudioCommand('afplay', [filePath]);
+    async play(filePath: string, options?: PlayAudioOptions): Promise<void> {
+      await runAudioCommand('afplay', [
+        ...afplayGainArgs(options?.gainDb),
+        filePath,
+      ]);
     },
   };
 }

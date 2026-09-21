@@ -2,12 +2,22 @@ import { runAudioCommand } from './run-audio-command.ts';
 import { isMissingFilter, speechNormalizeArgs } from './audio-normalize.ts';
 
 /**
- * Used in `encodeOpus`.
+ * Used in `encodeOpus` and `raspberry-audio.ts`.
  * Raspberry Pi OS ffmpeg sometimes has native `opus` but not `libopus`.
  */
-function isMissingLibopus(error: unknown): boolean {
+export function isMissingLibopus(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /unknown encoder ['"]libopus['"]/i.test(message) || /encoder ['"]libopus['"] not found/i.test(message);
+}
+
+/** Used in `encodeOpus` and `startFfmpegRecording`. */
+export function libopusEncoderArgs(): string[] {
+  return ['-c:a', 'libopus', '-b:a', '48k', '-vbr', 'on', '-application', 'voip'];
+}
+
+/** Used in `encodeOpus` and `startFfmpegRecording` when libopus is missing. */
+export function nativeOpusEncoderArgs(): string[] {
+  return ['-c:a', 'opus', '-b:a', '48k', '-strict', '-2'];
 }
 
 /** Used in `convertWavToOggOpus`. */
@@ -19,36 +29,16 @@ async function encodeOpus(
   const common = ['-y', '-loglevel', 'error', '-i', wavPath, ...filterArgs];
 
   try {
-    await runAudioCommand('ffmpeg', [
-      ...common,
-      '-c:a',
-      'libopus',
-      '-b:a',
-      '48k',
-      '-vbr',
-      'on',
-      '-application',
-      'voip',
-      oggPath,
-    ]);
+    await runAudioCommand('ffmpeg', [...common, ...libopusEncoderArgs(), oggPath]);
   } catch (error: unknown) {
     if (!isMissingLibopus(error)) throw error;
 
-    await runAudioCommand('ffmpeg', [
-      ...common,
-      '-c:a',
-      'opus',
-      '-b:a',
-      '48k',
-      '-strict',
-      '-2',
-      oggPath,
-    ]);
+    await runAudioCommand('ffmpeg', [...common, ...nativeOpusEncoderArgs(), oggPath]);
   }
 }
 
 /**
- * Used in `index.ts` and previously `send-last-tg.ts` before `tgSendVoice`.
+ * Used in `index.ts` on Mac (`start:dev`). The Pi records OGG/Opus directly.
  * Writes an OGG/Opus file next to the WAV (or to `oggPath` when provided).
  */
 export async function convertWavToOggOpus(

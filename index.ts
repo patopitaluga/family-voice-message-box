@@ -112,7 +112,7 @@ function refreshPlayLed(): void {
 
 /**
  * Used when a family voice arrives or after play drains the queue.
- * The chime only sounds on the off → on edge, and not while recording: `aplay`
+ * The chime only sounds on the off → on edge, and not while recording: playback
  * would bleed into the message the child is speaking.
  */
 function setUnheardAudio(pending: boolean): void {
@@ -137,7 +137,9 @@ const handlers = {
   async onPress() {
     if (isRecording) return;
 
-    currentRecordingPath = tempPath(`out-${String(Date.now())}.wav`);
+    currentRecordingPath = tempPath(
+      `out-${String(Date.now())}.${platform === 'raspberry' ? 'ogg' : 'wav'}`,
+    );
     console.log('Grabando…');
     recordLed.set(true);
     try {
@@ -158,7 +160,7 @@ const handlers = {
     await audio.stopRecording();
     recordLed.set(false);
 
-    const wavPath = currentRecordingPath;
+    const recordedPath = currentRecordingPath;
     const startedAt = recordingStartedAt;
     currentRecordingPath = undefined;
     recordingStartedAt = undefined;
@@ -166,11 +168,11 @@ const handlers = {
     const durationMs =
       startedAt === undefined ? undefined : Date.now() - startedAt;
 
-    let wavExists = false;
+    let recordedExists = false;
     let sizeLabel = 'tamaño desconocido';
-    if (wavPath !== undefined) try {
-        const { size } = await stat(wavPath);
-        wavExists = true;
+    if (recordedPath !== undefined) try {
+        const { size } = await stat(recordedPath);
+        recordedExists = true;
         if (size < 1024) sizeLabel = `${String(size)} B`;
          else if (size < 1024 * 1024) sizeLabel = `${(size / 1024).toFixed(1)} KB`;
          else sizeLabel = `${(size / (1024 * 1024)).toFixed(2)} MB`;
@@ -194,10 +196,10 @@ const handlers = {
       `Grabación lista (${durationLabel}, ${sizeLabel})`,
     );
 
-    if (wavPath === undefined) return;
-    if (!wavExists) {
+    if (recordedPath === undefined) return;
+    if (!recordedExists) {
       console.error(
-        'arecord no escribió el WAV. En la Pi: arecord -l  (tiene que haber un dispositivo de captura). ' +
+        'ffmpeg no escribió el audio. En la Pi: enchufa un micrófono USB (tiene que aparecer en `/proc/asound/pcm`). ' +
           'Grupo audio: sudo usermod -aG audio $USER. Opcional: ALSA_DEVICE=plughw:1,0 en .env',
       );
       return;
@@ -206,16 +208,24 @@ const handlers = {
     if (durationMs !== undefined && durationMs < MIN_RECORDING_MS) {
       console.warn(
         `No se envía: ${String(durationMs)} ms está por debajo del mínimo de ${String(MIN_RECORDING_MS)} ms. ` +
-          `Suele ser una pulsación fantasma. El audio queda en ${wavPath} para escucharlo (aplay ${wavPath}).`,
+          `Suele ser una pulsación fantasma. El audio queda en ${recordedPath} para inspeccionarlo.`,
       );
       return;
     }
 
+    const needsEncode = recordedPath.endsWith('.wav');
     let oggPath: string | undefined;
     try {
-      console.log('Convirtiendo a OGG/Opus…');
-      oggPath = await convertWavToOggOpus(wavPath, tempPath(`out-${String(Date.now())}.ogg`));
-      await unlink(wavPath).catch(() => undefined);
+      if (needsEncode) {
+        console.log('Convirtiendo a OGG/Opus…');
+        oggPath = await convertWavToOggOpus(
+          recordedPath,
+          tempPath(`out-${String(Date.now())}.ogg`),
+        );
+        await unlink(recordedPath).catch(() => undefined);
+      } else oggPath = recordedPath;
+
+      if (oggPath === undefined) return;
 
       console.log('Enviando a Telegram…');
       await tgSendVoice(telegramToken, chatId, oggPath);
@@ -225,7 +235,7 @@ const handlers = {
       console.error('No se pudo enviar a Telegram:', error);
     } finally {
       if (oggPath !== undefined) await unlink(oggPath).catch(() => undefined);
-      await unlink(wavPath).catch(() => undefined);
+      if (needsEncode) await unlink(recordedPath).catch(() => undefined);
     }
   },
 
@@ -253,8 +263,11 @@ const handlers = {
           ? 'Repitiendo el último audio del grupo…'
           : 'Reproduciendo audio nuevo del grupo…',
       );
-      wavPath = await convertOggOpusToWav(oggPath);
-      await audio.play(wavPath);
+      if (platform === 'raspberry') await audio.play(oggPath, { normalizePlayback: true });
+       else {
+        wavPath = await convertOggOpusToWav(oggPath);
+        await audio.play(wavPath);
+      }
 
       if (lastPlayedOgg !== undefined && lastPlayedOgg !== oggPath) await unlink(lastPlayedOgg).catch(() => undefined);
 

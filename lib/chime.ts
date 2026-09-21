@@ -4,61 +4,39 @@
  */
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runAudioCommand } from './run-audio-command.ts';
-import { tempPath } from './temp-dir.ts';
 import type { AudioControl } from './type-audio-control.ts';
 
 /** Resolved from this file, not the cwd, so systemd cannot miss it. */
 const CHIME_SOURCE = join(dirname(fileURLToPath(import.meta.url)), '..', 'chimes.mp3');
 
-let decodedChime: string | undefined;
-let decodeFailed = false;
-let sounding = false;
-
 /**
  * Used in `playChime`.
- * `aplay` only takes WAV, so the mp3 is decoded once and the result reused.
+ * The file is mastered at -27 LUFS while family voices come out at -14, so it
+ * arrived 13 dB below everything else the box plays. It peaks at -16 dBFS, so
+ * this much gain still lands 3 dB short of clipping.
  */
-async function decodeChimeOnce(): Promise<string | undefined> {
-  if (decodedChime !== undefined) return decodedChime;
-  if (decodeFailed) return undefined;
+const CHIME_GAIN_DB = 13;
 
-  const wavPath = tempPath('chime.wav');
-  try {
-    await runAudioCommand('ffmpeg', [
-      '-y',
-      '-loglevel',
-      'error',
-      '-i',
-      CHIME_SOURCE,
-      wavPath,
-    ]);
-  } catch (error: unknown) {
-    decodeFailed = true;
-    console.warn(`No se pudo preparar ${CHIME_SOURCE}; la caja no sonará al recibir audios.`, error);
-    return undefined;
-  }
-
-  decodedChime = wavPath;
-  return wavPath;
-}
+let sounding = false;
+let playFailed = false;
 
 /**
  * Used in `index.ts` when the play LED turns on.
  * Never throws and never overlaps itself: a chime that fails must not stop a
- * message from arriving.
+ * message from arriving. ffmpeg (Pi) and afplay (Mac) both play the mp3 directly.
  */
 export async function playChime(audio: AudioControl): Promise<void> {
-  if (sounding) return;
+  if (sounding || playFailed) return;
 
   sounding = true;
   try {
-    const wavPath = await decodeChimeOnce();
-    if (wavPath === undefined) return;
-
-    await audio.play(wavPath);
+    await audio.play(CHIME_SOURCE, { gainDb: CHIME_GAIN_DB });
   } catch (error: unknown) {
-    console.warn('No se pudo reproducir el chime:', error);
+    playFailed = true;
+    console.warn(
+      `No se pudo reproducir ${CHIME_SOURCE}; la caja no sonará al recibir audios.`,
+      error,
+    );
   } finally {
     sounding = false;
   }

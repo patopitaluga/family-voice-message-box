@@ -57,7 +57,7 @@ Si te interesa replicarla, colaborar o simplemente charlar sobre la idea, abre u
 
 ### Setup
 
-Necesitas **Node.js ≥ 24.7.0** (TypeScript nativo) y **ffmpeg** (para convertir las grabaciones a OGG/Opus antes de enviarlas a Telegram).
+Necesitas **Node.js ≥ 24.7.0** (TypeScript nativo) y **ffmpeg** (graba y reproduce en la Pi, y convierte a OGG/Opus en Mac).
 
 #### Raspberry Pi (Raspberry Pi OS)
 
@@ -66,11 +66,11 @@ sudo apt update
 sudo apt install -y ffmpeg alsa-utils gpiod
 ```
 
-- `ffmpeg` — conversión a OGG/Opus para Telegram  
-- `alsa-utils` — `arecord` / `aplay`  
+- `ffmpeg` — captura ALSA, OGG/Opus para Telegram, y reproducción  
+- `alsa-utils` — `amixer` / `alsamixer` (ganancia del hardware; se reporta al arrancar)  
 - `gpiod` — `gpiomon` / `gpioset` para botones y LEDs GPIO  
 
-El usuario tiene que estar en el grupo `audio` (`sudo usermod -aG audio $USER` y reiniciar sesión). El jack de 3,5 mm **no graba**. Enchufa un micrófono o auriculares USB; `npm start` prioriza ese dispositivo (`arecord -l`) sobre las placas internas de la Pi (`bcm2835`, HDMI) y no usa el PCM `default` (falla con `pcm_asym` / capture slave is not defined). Para forzar uno: `ALSA_DEVICE=plughw:1,0` en `.env`.  
+El usuario tiene que estar en el grupo `audio` (`sudo usermod -aG audio $USER` y reiniciar sesión). El jack de 3,5 mm **no graba**. Enchufa un micrófono o auriculares USB; `npm start` prioriza ese dispositivo (`/proc/asound/pcm`) sobre las placas internas de la Pi (`bcm2835`, HDMI) y no usa el PCM `default` (falla con `pcm_asym` / capture slave is not defined). Para forzar uno: `ALSA_DEVICE=plughw:1,0` en `.env`.  
 
 **No uses `apt install nodejs`.** En Raspberry Pi OS eso instala Node 20 (Debian 13 / Trixie) o 18 (Debian 12 / Bookworm). Node 20 no puede ejecutar archivos `.ts`: el stripping de tipos llegó en Node 22.6 (con flag) y es estable sin flag recién en 22.18+ / 24.
 
@@ -247,15 +247,16 @@ Hay dos modos, y el proceso **queda corriendo** en ambos. El hardware se detecta
 | Producción | `npm start` | Solo Raspberry Pi | Botones GPIO, nada más |
 | Desarrollo | `npm run start:dev` | Raspberry Pi o Mac | Teclado, además de los botones si estás en la Pi |
 
-En la Pi, `start:dev` usa el mismo `arecord` / `aplay` y los mismos LEDs que producción — lo único que agrega es el teclado. Sirve para depurar la caja entera sin cablear botones ni levantar el servicio.
+En la Pi, `start:dev` usa el mismo ffmpeg / ALSA y los mismos LEDs que producción — lo único que agrega es el teclado. Sirve para depurar la caja entera sin cablear botones ni levantar el servicio.
 
 #### Producción
 
-En la Raspberry Pi (botones GPIO + LEDs + `arecord` / `aplay`):
+En la Raspberry Pi (botones GPIO + LEDs + ffmpeg sobre ALSA):
 
 - Mantén pulsado **grabar** para hablar; suelta para enviar al grupo (el audio solo vive en `temp/` hasta enviarse).
 - Cuando alguien del grupo envía una nota de voz, suena `chimes.mp3` y el LED de **oír** se enciende; púlsalo para escucharla. Sin mensajes nuevos, ese mismo botón repite el último audio cuantas veces quieras, iluminándose mientras lo mantienes apretado.
 - El chime suena solo en la transición de apagado a encendido, y nunca mientras se está grabando, para no colarse en el mensaje del niño. Si `chimes.mp3` falta o ffmpeg no puede decodificarlo, lo avisa en el log una vez y la caja sigue funcionando en silencio.
+- El archivo viene masterizado a -27 LUFS, 13 dB por debajo de las notas de voz, así que se reproduce con `+13 dB` fijos (`CHIME_GAIN_DB` en `lib/chime.ts`) para que quede al mismo volumen que los mensajes. A diferencia de las voces no se usa `loudnorm`: en un clip de dos segundos el filtro bombea el nivel en vez de corregirlo. Si lo quieres más fuerte o más suave, cambia esa constante; por encima de +16 dB empieza a saturar.
 
 ```bash
 npm start
@@ -276,7 +277,7 @@ Cuando todo está listo, **`npm start`** avisa al grupo familiar con un mensaje 
 
 Hay dos niveles distintos y conviene no confundirlos.
 
-El **mezclador de ALSA** es la ganancia fija del hardware, y es la causa habitual de que todo suene bajo: muchas placas USB vienen de fábrica cerca de 0 %. Es lo que reporta el arranque. Se ajusta con `alsamixer -c N` —**F4** para las entradas, **F3** para las salidas— y se persiste con `sudo alsactl store`, si no se pierde al reiniciar. La HDMI nunca puede ser la culpable de una grabación baja: `arecord -l` solo lista dispositivos de captura, y las salidas de la Pi (jack y HDMI) no graban.
+El **mezclador de ALSA** es la ganancia fija del hardware, y es la causa habitual de que todo suene bajo: muchas placas USB vienen de fábrica cerca de 0 %. Es lo que reporta el arranque. Se ajusta con `alsamixer -c N` —**F4** para las entradas, **F3** para las salidas— y se persiste con `sudo alsactl store`, si no se pierde al reiniciar. La HDMI nunca puede ser la culpable de una grabación baja: `/proc/asound/pcm` en captura no lista las salidas de la Pi (jack y HDMI).
 
 La **normalización por software** es lo que hace este proyecto con ffmpeg en cada audio, porque el mezclador es un valor fijo y el niño habla a distinta distancia cada vez. Al enviar aplica `speechnorm`, que nivela la voz; al reproducir aplica `loudnorm` a −14 LUFS, para que las notas de voz de la familia lleguen todas al mismo volumen. Si tu ffmpeg no trae alguno de esos filtros, avisa en el log y sigue sin normalizar. Para desactivarlo, `AUDIO_NORMALIZE=off` en `.env`.
 
@@ -286,11 +287,11 @@ Súbelo primero en el mezclador y deja la normalización para lo que el mezclado
 
 Opus, el códec de las notas de voz de Telegram, funciona **siempre** a 48 kHz. Grabar a cualquier otra frecuencia obliga a dos conversiones invisibles: ALSA remuestrea al capturar y ffmpeg vuelve a remuestrear al codificar. Y el remuestreador de la capa `plug` de ALSA es de mala calidad salvo que esté instalado `libasound2-plugins`.
 
-Por eso, al empezar cada grabación, la caja le pregunta al micrófono qué frecuencias admite (`arecord --dump-hw-params` sobre el dispositivo `hw:` crudo, porque `plughw` dice que acepta cualquier cosa) y elige 48 kHz si está dentro de su rango. Si el micrófono no llega, graba a la mejor que tenga y deja la única conversión en manos de ffmpeg, cuyo remuestreador es muy superior al de ALSA. El arranque informa cuál eligió y por qué. Para forzarla: `ALSA_RATE=48000` en `.env`.
+Por eso, al empezar cada grabación, la caja le pregunta al micrófono qué frecuencias admite (`/proc/asound/cardN/stream0` en USB; `plughw` dice que acepta cualquier cosa) y elige 48 kHz si está dentro de su rango. Si el micrófono no llega, graba a la mejor que tenga y deja la única conversión en manos de ffmpeg, cuyo remuestreador es muy superior al de ALSA. El arranque informa cuál eligió y por qué. Para forzarla: `ALSA_RATE=48000` en `.env`.
 
 `npm start` **ignora el teclado**: solo escucha los botones GPIO. Un teclado USB olvidado dentro de la caja, o una placa de sonido USB que se registra como HID, podrían disparar grabaciones fantasma, así que en funcionamiento los botones son la única fuente de pulsaciones.
 
-Además, las grabaciones de **menos de 2 segundos no se envían**: casi siempre son una pulsación fantasma. El WAV queda en `temp/` y el motivo se registra en el log, para poder escucharlo y entender qué las dispara.
+Además, las grabaciones de **menos de 2 segundos no se envían**: casi siempre son una pulsación fantasma. El audio queda en `temp/` y el motivo se registra en el log, para poder escucharlo y entender qué las dispara.
 
 En la Pi conviene el [arranque automático](#arranque-automático-raspberry-pi) en lugar de lanzar `npm start` a mano.
 

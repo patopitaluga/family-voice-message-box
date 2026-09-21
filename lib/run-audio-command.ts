@@ -20,7 +20,7 @@ export function startAudioProcess(
 
 /**
  * Used in `raspberry-audio.ts` and `mac-audio.ts` when ending a recording.
- * Sends `q` when stdin is available (ffmpeg), otherwise SIGINT (`arecord`).
+ * Sends `q` when stdin is available (ffmpeg), otherwise SIGINT.
  */
 export async function stopAudioProcess(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;

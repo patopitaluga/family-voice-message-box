@@ -28,7 +28,7 @@ export function createAudioControl(platform: Platform): AudioControl {
 /**
  * Used in `index.ts`.
  * Comes from the host, not from argv, so `npm run start:dev` on the Pi still
- * records with `arecord` instead of trying macOS AVFoundation.
+ * records with ffmpeg + ALSA instead of trying macOS AVFoundation.
  */
 export function detectPlatform(): Platform {
   return isRaspberryPiOsHost() ? 'raspberry' : 'mac';
