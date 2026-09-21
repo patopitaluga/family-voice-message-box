@@ -16,6 +16,18 @@ export type FamilyVoiceListenerOptions = {
   onVoiceDownloaded: (localOggPath: string) => void | Promise<void>;
 };
 
+/** Used in `index.ts`. */
+export type FamilyVoiceListener = {
+  /**
+   * Resolves once the backlog has been drained and the loop is really polling.
+   * `index.ts` waits for it before telling the family the box is ready, so that
+   * a voice note sent right after that message cannot land in the discarded backlog.
+   */
+  listening: Promise<void>;
+  /** Stops the loop and aborts the in-flight long-poll. */
+  stop: () => void;
+};
+
 type TgUpdate = {
   update_id: number;
   message?: {
@@ -28,14 +40,20 @@ type TgUpdate = {
 /**
  * Used in `index.ts`.
  * Skips backlog on start; ignores the bot's own outbound voices.
- * Returns a stop function (also aborts the in-flight long-poll).
  */
 export function listenToFamilyGroupVoices(
   options: FamilyVoiceListenerOptions,
-): () => void {
+): FamilyVoiceListener {
   let stopped = false;
   let offset: number | undefined;
   let inFlight: AbortController | undefined;
+
+  // Replaced synchronously by the executor below; the no-op only keeps TypeScript
+  // from seeing a variable used before assignment.
+  let markListening = (): void => undefined;
+  const listening = new Promise<void>((resolve) => {
+    markListening = resolve;
+  });
 
   const fetchUpdates = async (
     timeoutSec: number,
@@ -67,12 +85,28 @@ export function listenToFamilyGroupVoices(
     return { updates: data.result, nextOffset };
   };
 
+  /**
+   * Discards pending updates so startup does not replay old voices.
+   * Retries instead of giving up: at boot the network is often not up yet, and
+   * a single failure here used to kill the listener for the whole session.
+   */
+  const drainBacklog = async (): Promise<void> => {
+    while (!stopped) try {
+        const drained = await fetchUpdates(0);
+        offset = drained.nextOffset;
+        return;
+      } catch (error: unknown) {
+        if (stopped) return;
+        if (error instanceof Error && error.name === 'AbortError') return;
+        console.error('Aún no se puede escuchar el grupo; se reintenta:', error);
+        await sleep(2000);
+      }
+  };
+
   const loop = async (): Promise<void> => {
     await ensureTempDir();
-
-    // Discard pending updates so startup does not replay old voices.
-    const drained = await fetchUpdates(0);
-    offset = drained.nextOffset;
+    await drainBacklog();
+    markListening();
 
     while (!stopped) try {
         const { updates, nextOffset } = await fetchUpdates(30);
@@ -90,11 +124,21 @@ export function listenToFamilyGroupVoices(
       }
   };
 
-  void loop();
+  void loop().catch((error: unknown) => {
+    // Everything recoverable is already retried inside the loop, so reaching here
+    // means the box cannot receive voices at all. Say so and let startup finish:
+    // recording still works, and a hung promise would hide the failure.
+    console.error('El listener del grupo familiar se detuvo:', error);
+    markListening();
+  });
 
-  return (): void => {
-    stopped = true;
-    inFlight?.abort();
+  return {
+    listening,
+    stop: (): void => {
+      stopped = true;
+      inFlight?.abort();
+      markListening();
+    },
   };
 }
 

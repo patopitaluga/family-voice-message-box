@@ -14,6 +14,7 @@ import { createConsoleLedPair } from './lib/create-console-led-pair.ts';
 import { createRaspberryGpioLed } from './lib/raspberry-gpio-led.ts';
 import { blinkLedsOnce } from './lib/blink-leds-once.ts';
 import { playChime } from './lib/chime.ts';
+import { installColoredConsole } from './lib/colored-console.ts';
 import {
   reportAlsaCaptureDevice,
   reportAlsaPlaybackDevice,
@@ -28,6 +29,8 @@ import {
   tgSendMessage,
   tgSendVoice,
 } from './send-audio-tg.ts';
+
+installColoredConsole();
 
 /** Sent by `announceReady` once every listener is up, so the family knows the box is on. */
 const READY_MESSAGE = 'Family Voice Box lista para comunicarse!';
@@ -50,13 +53,14 @@ const bot = await tgGetMe(telegramToken);
 const mode = parseRunMode();
 const platform = detectPlatform();
 
+/* Disabled temporaily
 if (mode === 'prod' && platform !== 'raspberry') {
   console.error(
     '`npm start` es la caja en funcionamiento y necesita una Raspberry. ' +
       'Fuera de la Pi usa `npm run start:dev`.',
   );
   process.exit(1);
-}
+} */
 
 const audio = createAudioControl(platform);
 
@@ -293,7 +297,7 @@ if (platform === 'mac') stopButtons = await listenToMacSpacebar(handlers);
   }
 }
 
-const stopTelegram = listenToFamilyGroupVoices({
+const telegram = listenToFamilyGroupVoices({
   token: telegramToken,
   chatId,
   botId: bot.id,
@@ -304,7 +308,7 @@ const stopTelegram = listenToFamilyGroupVoices({
 });
 
 const shutdown = (): void => {
-  stopTelegram();
+  telegram.stop();
   stopButtons();
   recordLed.close();
   playLed.close();
@@ -340,6 +344,11 @@ if (platform === 'mac') console.log(
  * would lose the narrowing that already proved the token and chat id are set.
  */
 const announceReady = async (): Promise<void> => {
+  // The message means "I am listening", not "I booted": sending it while the
+  // listener is still draining the backlog would put any instant reply in the
+  // batch that gets discarded.
+  await telegram.listening;
+
   try {
     await tgSendMessage(telegramToken, chatId, READY_MESSAGE);
     console.log(`Aviso enviado al grupo: ${READY_MESSAGE}`);

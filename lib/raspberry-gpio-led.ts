@@ -16,10 +16,20 @@ function reportUnexpectedExit(
   chip: string,
   line: number,
   code: number | null,
+  signal: NodeJS.Signals | null,
   stderr: string,
 ): void {
   const where = `${chip} línea ${String(line)}`;
   const details = stderr.trim();
+
+  if (signal !== null) {
+    console.error(
+      `gpioset recibió ${signal} en ${where} sin que se lo pidiéramos: la línea queda ` +
+        'liberada y el LED apagado. Busca quién lo mató en el journal del kernel ' +
+        '(OOM, caídas de tensión): journalctl -k -b',
+    );
+    return;
+  }
 
   if (code === 0) {
     console.error(
@@ -45,20 +55,47 @@ export function createRaspberryGpioLed(chip: string, line: number): Led {
   if (!Number.isInteger(line) || line < 0) throw new Error(`Invalid GPIO LED line: ${String(line)}`);
 
   let child: ChildProcess | undefined;
-  /** `undefined` until the first `set`: the real line state is unknown at start. */
+  /** `undefined` whenever nobody drives the line, so the next `set` always acts. */
   let current: boolean | undefined;
+  /** Their exit is ours (a `set` replacing them, or `close`), not something to report. */
+  const killedByUs = new WeakSet<ChildProcess>();
+
+  /** True only while a `gpioset` is alive and therefore really holding the line. */
+  const holding = (): boolean =>
+    child !== undefined && child.exitCode === null && child.signalCode === null;
+
+  /**
+   * Nobody drives the line once its process is gone, so the cached value becomes
+   * a claim we cannot back: drop it, or every later `set` to that same value
+   * would be skipped and the LED would never light again.
+   */
+  const forget = (gone: ChildProcess): void => {
+    if (child !== gone) return;
+    child = undefined;
+    current = undefined;
+  };
 
   const stop = (): void => {
     if (child === undefined) return;
-    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    if (child.exitCode === null && child.signalCode === null) {
+      killedByUs.add(child);
+      child.kill('SIGTERM');
+    }
+
     child = undefined;
   };
 
   return {
     set(on: boolean): void {
-      // Re-setting the same value would SIGTERM the live `gpioset` and start
-      // another one: the line drops for a moment and the LED blinks.
-      if (on === current) return;
+      // Re-setting a value a live `gpioset` already holds would SIGTERM it and
+      // start another one: the line drops for a moment and the LED blinks.
+      if (on === current && holding()) return;
+
+      if (on === current) console.warn(
+          `LED ${chip}:${String(line)}: la caché decía ${on ? '1' : '0'} pero ningún ` +
+            'gpioset sostenía la línea. Se relanza.',
+        );
+
       current = on;
 
       stop();
@@ -66,6 +103,9 @@ export function createRaspberryGpioLed(chip: string, line: number): Led {
         stdio: ['ignore', 'ignore', 'pipe'],
       });
       child = started;
+      console.log(
+        `gpioset ${chip} ${String(line)}=${on ? '1' : '0'} (pid ${String(started.pid ?? 0)})`,
+      );
 
       let stderr = '';
       started.stderr?.setEncoding('utf8');
@@ -74,6 +114,7 @@ export function createRaspberryGpioLed(chip: string, line: number): Led {
       });
 
       started.once('error', (error) => {
+        forget(started);
         console.error(
           `gpioset failed for ${chip} line ${String(line)}. Is gpiod installed?`,
           error,
@@ -81,14 +122,13 @@ export function createRaspberryGpioLed(chip: string, line: number): Led {
       });
 
       started.once('exit', (code, signal) => {
-        // We SIGTERM the previous process on every `set` and on `close`.
-        if (signal !== null) return;
+        forget(started);
 
-        // Nobody drives the line now, so the cached value is a lie: drop it or
-        // the next `set` to the same value would be skipped and never recover.
-        if (child === started) current = undefined;
+        // Anything else killing it leaves the LED dark with nothing in the log,
+        // which is the one failure we cannot tell apart from bad wiring.
+        if (signal !== null && killedByUs.has(started)) return;
 
-        reportUnexpectedExit(chip, line, code, stderr);
+        reportUnexpectedExit(chip, line, code, signal, stderr);
       });
     },
 

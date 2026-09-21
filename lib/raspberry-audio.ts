@@ -130,6 +130,98 @@ async function pickPlaybackDevice(): Promise<string | undefined> {
 }
 
 /**
+ * Used in `chooseCaptureRate`.
+ * Opus only ever encodes at 48 kHz, so recording at anything else guarantees a
+ * resampling step later. Matching it here is what makes the chain conversion-free.
+ */
+const OPUS_RATE = 48000;
+
+/** Used in `pickCaptureRate`, keyed by ALSA device: probing spawns `arecord`. */
+const rateByDevice = new Map<string, number>();
+
+/**
+ * Used in `pickCaptureRate`.
+ * `--dump-hw-params` only tells the truth about a raw `hw:` device: `plughw`
+ * claims to accept everything because it converts in software.
+ */
+function rawHwDevice(device: string): string | undefined {
+  if (device.startsWith('plughw:')) return device.replace(/^plughw:/, 'hw:');
+  if (device.startsWith('hw:')) return device;
+
+  return undefined;
+}
+
+/**
+ * Used in `chooseCaptureRate`.
+ * The `RATE:` line comes either as a range (`RATE: [8000 48000]`) or as a list
+ * of discrete values, so we just collect every number on it.
+ */
+function parseHwRates(dump: string): number[] {
+  const line = /^RATE:.*$/m.exec(dump);
+  if (line === null) return [];
+
+  return [...line[0].matchAll(/\d+/g)].map((match) => Number(match[0]));
+}
+
+/** Used in `pickCaptureRate`. */
+function chooseCaptureRate(rates: number[]): number | undefined {
+  if (rates.length === 0) return undefined;
+
+  // Inside the supported span we prefer Opus' own rate even if the card lists
+  // discrete values: at worst ALSA converts, which it would have to do anyway.
+  if (OPUS_RATE >= Math.min(...rates) && OPUS_RATE <= Math.max(...rates)) return OPUS_RATE;
+
+  // Otherwise record at the card's best and let ffmpeg do the single conversion,
+  // since its resampler is far better than the one in ALSA's plug layer.
+  return Math.max(...rates);
+}
+
+/**
+ * Used in `createRaspberryAudioControl` and `reportAlsaCaptureDevice`.
+ * `ALSA_RATE` wins; otherwise ask the card and fall back to Opus' rate.
+ */
+export async function pickCaptureRate(device: string): Promise<number> {
+  const env = Number(process.env.ALSA_RATE?.trim());
+  if (Number.isInteger(env) && env > 0) return env;
+
+  const cached = rateByDevice.get(device);
+  if (cached !== undefined) return cached;
+
+  const rate = (await probeCaptureRate(device)) ?? OPUS_RATE;
+  rateByDevice.set(device, rate);
+  return rate;
+}
+
+/**
+ * Used in `probeCaptureRate`.
+ * `--dump-hw-params` prints to stderr and exits non-zero by design, so the
+ * failure path is the normal one and its output still has to be read.
+ */
+async function dumpHwParams(hw: string): Promise<string> {
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      'arecord',
+      ['-D', hw, '--dump-hw-params', '-d', '1', '/dev/null'],
+      { encoding: 'utf8', timeout: 5000 },
+    );
+    return `${stdout}${stderr}`;
+  } catch (error: unknown) {
+    if (error === null || typeof error !== 'object') return '';
+
+    const spawned = error as { stdout?: string; stderr?: string };
+    return `${spawned.stdout ?? ''}${spawned.stderr ?? ''}`;
+  }
+}
+
+/** Used in `pickCaptureRate`. */
+async function probeCaptureRate(device: string): Promise<number | undefined> {
+  const hw = rawHwDevice(device);
+  if (hw === undefined) return undefined;
+
+  return chooseCaptureRate(parseHwRates(await dumpHwParams(hw)));
+}
+
+/**
  * Used in `reportAlsaCaptureDevice` and `reportAlsaPlaybackDevice`.
  * Cards often ship muted or near 0 %, which is the usual reason audio is audible
  * but far too quiet no matter how close you speak or how loud the speaker is.
@@ -164,6 +256,25 @@ function volumeLine(
   return (
     `${base} — baja. Súbela con \`alsamixer -c ${String(card)}\` (${hint}) ` +
     'y guárdala con `sudo alsactl store`.'
+  );
+}
+
+/**
+ * Used in `reportAlsaCaptureDevice`.
+ * Recording at anything other than 48 kHz is the quiet, invisible way to lose
+ * quality: ALSA converts on the way in and ffmpeg converts it back for Opus.
+ */
+async function captureRateLine(device: string): Promise<string> {
+  const rate = await pickCaptureRate(device);
+  const base = `  Frecuencia: ${String(rate)} Hz`;
+
+  if (process.env.ALSA_RATE?.trim() !== undefined && process.env.ALSA_RATE.trim() !== '') return `${base} (forzada con ALSA_RATE en .env)`;
+
+  if (rate === OPUS_RATE) return `${base} — la misma que usa Opus, sin remuestreo`;
+
+  return (
+    `${base} — el micrófono no llega a ${String(OPUS_RATE)} Hz, así que ffmpeg ` +
+    'convierte al codificar.'
   );
 }
 
@@ -217,6 +328,8 @@ export async function reportAlsaCaptureDevice(): Promise<void> {
         'Para forzar una: ALSA_DEVICE=plughw:N,0 en .env',
     );
 
+  console.log(await captureRateLine(alsaPlughw(hw)));
+
   const volume = await readMixerVolumePercent(hw.card, 'Capture');
   if (volume === undefined) return;
 
@@ -268,8 +381,12 @@ export async function reportAlsaPlaybackDevice(): Promise<void> {
 /**
  * Used in `createRaspberryAudioControl`.
  */
-function arecordArgs(outputPath: string, device: string | undefined): string[] {
-  const args = ['-f', 'S16_LE', '-r', '44100', '-c', '1'];
+function arecordArgs(
+  outputPath: string,
+  device: string | undefined,
+  rate: number,
+): string[] {
+  const args = ['-f', 'S16_LE', '-r', String(rate), '-c', '1'];
   if (device !== undefined && device !== '') args.push('-D', device);
 
   args.push('-t', 'wav', outputPath);
@@ -291,8 +408,12 @@ export function createRaspberryAudioControl(): AudioControl {
       if (recording) throw new Error('Recording already in progress');
 
       const device = await pickCaptureDevice();
+      const rate = device === undefined ? OPUS_RATE : await pickCaptureRate(device);
       recordingStderr = '';
-      const child = startAudioProcess('arecord', arecordArgs(outputPath, device));
+      const child = startAudioProcess(
+        'arecord',
+        arecordArgs(outputPath, device, rate),
+      );
 
       child.stderr?.setEncoding('utf8');
       child.stderr?.on('data', (chunk: string) => {

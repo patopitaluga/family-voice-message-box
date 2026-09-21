@@ -12,7 +12,6 @@
   - [Dependencias del proyecto](#dependencias-del-proyecto)
   - [Ejecutar](#ejecutar)
   - [Arranque automático (Raspberry Pi)](#arranque-automático-raspberry-pi)
-- [Estado](#estado)
 - [Licencia](#licencia)
 
 ------
@@ -96,7 +95,7 @@ Hay **dos botones LED** (momentáneos, active-low, pull-up interno):
 
 - LED de **grabar**: se enciende mientras está pulsado (está grabando).
 - LED de **oír**: se enciende mientras está pulsado, y además queda encendido solo cuando llega una nota de voz al grupo, junto con el chime (`chimes.mp3`), hasta que se reproduce. O sea: al soltar, vuelve a encendido si quedan audios nuevos y apagado si no. Para comprobar el cableado sin esperar a nadie, `npm start` enciende los dos LEDs 2 segundos al arrancar.
-- Si en ese test **no enciende ninguno**, mira el log antes de revisar cables: `journalctl -u family-voice-message-box -b | grep gpioset`. La línea solo está energizada mientras vive el proceso `gpioset`, así que cualquier salida inesperada suya (permisos, chip equivocado, una versión de libgpiod que no mantiene el valor) deja el LED apagado y queda registrada ahí.
+- Si un LED **no enciende cuando debería**, mira el log antes de revisar cables: `journalctl -u family-voice-message-box -b | grep gpioset`. Cada encendido y cada apagado deja una línea `gpioset gpiochip0 23=1 (pid N)`, así que ahí se ve si el software llegó a pedirlo. La línea solo está energizada mientras vive ese proceso, y cualquier final inesperado suyo —permisos, chip equivocado, o que algo externo lo mate— también queda registrado. Si el log muestra el `=1` y el LED sigue apagado, el problema es eléctrico: párala (`sudo systemctl stop family-voice-message-box`) y sostén la línea a mano con `gpioset --chip gpiochip0 23=1`, que se queda bloqueado hasta que le des Ctrl+C.
 - GND: los ocho pines de masa (6, 9, 14, 20, 25, 30, 34, 39) son equivalentes, así que cada cable puede ir al que quede más cómodo. El diagrama usa uno distinto para cada masa — grabar en **6** y **9**, oír en **14** y **20** — para no meter dos cables en el mismo agujero. Quedan libres 25, 30, 34 y 39.
 
 Cada botón tiene **4 lengüetas**: izquierda, derecha, inferior y posterior. En el plástico, posterior y derecha suelen decir **COM** y **NO** (el clic). Izquierda e inferior son el LED (si no enciende, intercambialas). ~330 Ω en el GPIO del LED si hace falta.
@@ -271,7 +270,7 @@ Parlante: bcm2835 Headphones (plughw:0,0)
   Volumen de salida: 40 % — baja. Súbela con `alsamixer -c 0` (F3 = Playback) y guárdala con `sudo alsactl store`.
 ```
 
-Cuando todo está listo, **`npm start`** avisa al grupo familiar con un mensaje de texto — **“Family Voice Box lista para comunicarse!”** — así se sabe que la caja está encendida sin tener que preguntar. Si ese envío falla, lo registra en consola pero la caja sigue funcionando igual. `npm run start:dev` no lo manda: son sesiones de depuración y el grupo recibiría un aviso en cada reinicio.
+Cuando todo está listo, **`npm start`** avisa al grupo familiar con un mensaje de texto — **“Family Voice Box lista para comunicarse!”** — así se sabe que la caja está encendida sin tener que preguntar. El aviso espera a que la caja esté **realmente escuchando** el grupo, no solo a que el programa arrancara: al iniciar descarta los mensajes viejos para no reproducirlos, y anunciarse antes de terminar esa limpieza podría tirar a la basura una respuesta inmediata. Si ese envío falla, lo registra en consola pero la caja sigue funcionando igual. `npm run start:dev` no lo manda: son sesiones de depuración y el grupo recibiría un aviso en cada reinicio.
 
 #### Volumen
 
@@ -282,6 +281,12 @@ El **mezclador de ALSA** es la ganancia fija del hardware, y es la causa habitua
 La **normalización por software** es lo que hace este proyecto con ffmpeg en cada audio, porque el mezclador es un valor fijo y el niño habla a distinta distancia cada vez. Al enviar aplica `speechnorm`, que nivela la voz; al reproducir aplica `loudnorm` a −14 LUFS, para que las notas de voz de la familia lleguen todas al mismo volumen. Si tu ffmpeg no trae alguno de esos filtros, avisa en el log y sigue sin normalizar. Para desactivarlo, `AUDIO_NORMALIZE=off` en `.env`.
 
 Súbelo primero en el mezclador y deja la normalización para lo que el mezclador no puede arreglar. Normalizar una señal muy débil amplifica también el ruido de fondo.
+
+#### Frecuencia de muestreo
+
+Opus, el códec de las notas de voz de Telegram, funciona **siempre** a 48 kHz. Grabar a cualquier otra frecuencia obliga a dos conversiones invisibles: ALSA remuestrea al capturar y ffmpeg vuelve a remuestrear al codificar. Y el remuestreador de la capa `plug` de ALSA es de mala calidad salvo que esté instalado `libasound2-plugins`.
+
+Por eso, al empezar cada grabación, la caja le pregunta al micrófono qué frecuencias admite (`arecord --dump-hw-params` sobre el dispositivo `hw:` crudo, porque `plughw` dice que acepta cualquier cosa) y elige 48 kHz si está dentro de su rango. Si el micrófono no llega, graba a la mejor que tenga y deja la única conversión en manos de ffmpeg, cuyo remuestreador es muy superior al de ALSA. El arranque informa cuál eligió y por qué. Para forzarla: `ALSA_RATE=48000` en `.env`.
 
 `npm start` **ignora el teclado**: solo escucha los botones GPIO. Un teclado USB olvidado dentro de la caja, o una placa de sonido USB que se registra como HID, podrían disparar grabaciones fantasma, así que en funcionamiento los botones son la única fuente de pulsaciones.
 
@@ -362,7 +367,10 @@ Para ver qué hizo desde el último arranque, o seguirlo en vivo mientras pulsas
 ```bash
 journalctl -u family-voice-message-box -b --no-pager
 journalctl -u family-voice-message-box -f
+journalctl -u family-voice-message-box -b -p warning   # solo errores y avisos
 ```
+
+Los errores salen **en rojo** y los avisos en amarillo, tanto en la terminal como en `journalctl`. En la terminal es color ANSI; como servicio no hay terminal, así que se marcan con la prioridad de syslog, que es lo que `journalctl` colorea y lo que hace funcionar el filtro `-p` de arriba.
 
 **No ejecutes `npm start` mientras el servicio corre**: los dos procesos pelearían por las mismas líneas GPIO y `gpiomon` fallaría. Párala primero.
 
@@ -374,11 +382,57 @@ sudo systemctl disable --now family-voice-message-box
 
 El usuario del servicio debe pertenecer a los grupos `audio` y `gpio` (el script lo intenta con `usermod`). Si acabas de agregarlos, reinicia la sesión o la Pi.
 
-------
+#### Actualizar la caja por SSH
 
-## Estado
+No hace falta pantalla, teclado ni ratón. Con la Pi encendida y en la misma red, se entra desde la terminal de la Mac:
 
-Proyecto en etapa inicial.
+```bash
+ssh pi@raspberrypi.local
+```
+
+Cambia `pi` por tu usuario y `raspberrypi` por el hostname de la Pi. El sufijo `.local` lo resuelve macOS por mDNS, así que no hace falta averiguar la IP; si no responde, búscala en el router y usa `ssh pi@192.168.1.X`. SSH tiene que estar habilitado: se activa al grabar la tarjeta con Raspberry Pi Imager, con `sudo raspi-config` (Interface Options → SSH), o creando un archivo vacío llamado `ssh` en la partición de arranque de la SD.
+
+Ya dentro, actualizar es lo de siempre:
+
+```bash
+cd ~/family-voice-message-box
+git pull
+sudo systemctl restart family-voice-message-box
+```
+
+El `git pull` no pide credenciales porque el remoto es HTTPS público. **No hace falta reiniciar la Pi**: no hay nada cacheado, systemd lanza `node index.ts` cada vez que arranca el servicio y ahí lee el código nuevo. Si el `pull` tocó `package.json`, corre `npm install` antes del restart.
+
+El restart repite el test de LEDs y el aviso a Telegram, así que ya sirve de comprobación. Para ver el detalle, deja el `journalctl -f` de [Comprobar que está corriendo](#comprobar-que-está-corriendo) abierto en la sesión SSH mientras pulsas los botones de la caja.
+
+##### En un solo comando desde la Mac
+
+`npm run update:pi` hace todo lo anterior sin abrir una sesión: entra por SSH, actualiza, reinicia y te muestra las últimas 25 líneas del log para que veas el arranque. Solo instala dependencias si el `git pull` tocó `package.json`, porque en la Pi eso tarda medio minuto aunque no haya nada que hacer.
+
+Necesita una línea en el `.env` **de la Mac**:
+
+```bash
+RASPBERRY_HOST=pi@raspberrypi.local
+```
+
+Opcionalmente `RASPBERRY_DIR` (por defecto `family-voice-message-box`, relativo al home de la Pi, o una ruta absoluta) y `RASPBERRY_SERVICE` (por defecto el nombre del servicio).
+
+**No pongas la contraseña en el `.env`.** Con dos comandos, que se corren una sola vez, el comando queda sin pedir nada. El primero copia tu clave SSH a la Pi:
+
+```bash
+ssh-keygen -t ed25519   # solo si aún no tienes ~/.ssh/id_ed25519
+ssh-copy-id pi@raspberrypi.local
+```
+
+El segundo, ya en la Pi, permite reiniciar **solo ese servicio** sin contraseña. Es más seguro que guardar la contraseña, porque no habilita ningún otro `sudo`:
+
+```bash
+echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart family-voice-message-box" | sudo tee /etc/sudoers.d/family-voice-message-box
+sudo chmod 440 /etc/sudoers.d/family-voice-message-box
+```
+
+Sin esos dos pasos el comando funciona igual, solo que te pedirá la contraseña de SSH y la de `sudo` por terminal.
+
+Si prefieres editar archivos —`.env`, por ejemplo— en vez de pelear con `nano`, la extensión **Remote - SSH** de Cursor o VS Code abre la carpeta de la Pi como si fuera local, con editor y terminal integrada.
 
 ------
 
