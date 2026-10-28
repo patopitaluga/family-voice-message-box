@@ -57,7 +57,7 @@ Si te interesa replicarla, colaborar o simplemente charlar sobre la idea, abre u
 
 ### Setup
 
-Necesitas **Node.js ≥ 24.7.0** (TypeScript nativo) y **ffmpeg** (graba y reproduce en la Pi, y convierte a OGG/Opus en Mac).
+Necesitas **Node.js ≥ 24.7.0** (TypeScript nativo) y **ffmpeg** (reproduce en la Pi y convierte a OGG/Opus los audios grabados con `arecord` o en Mac).
 
 #### Raspberry Pi (Raspberry Pi OS)
 
@@ -66,11 +66,12 @@ sudo apt update
 sudo apt install -y ffmpeg alsa-utils gpiod
 ```
 
-- `ffmpeg` — captura ALSA, OGG/Opus para Telegram, y reproducción  
+- `ffmpeg` — grabación predeterminada, reproducción, y conversión OGG/Opus
+- `arecord` — captura ALSA alternativa (`alsa-utils`), seleccionable con `AUDIO_RECORDER=arecord` en `.env`
 - `alsa-utils` — `amixer` / `alsamixer` (ganancia del hardware; se reporta al arrancar)  
 - `gpiod` — `gpiomon` / `gpioset` para botones y LEDs GPIO  
 
-El usuario tiene que estar en el grupo `audio` (`sudo usermod -aG audio $USER` y reiniciar sesión). El jack de 3,5 mm **no graba**. Enchufa un micrófono o auriculares USB; `npm start` prioriza ese dispositivo (`/proc/asound/pcm`) sobre las placas internas de la Pi (`bcm2835`, HDMI) y no usa el PCM `default` (falla con `pcm_asym` / capture slave is not defined). Para forzar uno: `ALSA_DEVICE=plughw:1,0` en `.env`.  
+El usuario tiene que estar en el grupo `audio` (`sudo usermod -aG audio $USER` y reiniciar sesión). El jack de 3,5 mm **no graba**. Enchufa un micrófono o auriculares USB; `npm start` prioriza ese dispositivo (`/proc/asound/pcm`) sobre las placas internas de la Pi (`bcm2835`, HDMI) y no usa el PCM `default` (falla con `pcm_asym` / capture slave is not defined). Para forzar uno: `ALSA_DEVICE=plughw:1,0` en `.env`. Para comparar el inicio de captura, `AUDIO_RECORDER=arecord` selecciona `arecord` (guarda WAV y luego convierte a OGG/Opus); el valor predeterminado es `ffmpeg`. La latencia de cada inicio identifica el grabador usado.
 
 **No uses `apt install nodejs`.** En Raspberry Pi OS eso instala Node 20 (Debian 13 / Trixie) o 18 (Debian 12 / Bookworm). Node 20 no puede ejecutar archivos `.ts`: el stripping de tipos llegó en Node 22.6 (con flag) y es estable sin flag recién en 22.18+ / 24.
 
@@ -93,7 +94,7 @@ Hay **dos botones LED** (momentáneos, active-low, pull-up interno):
 | **Grabar** (mantener pulsado) | 17 | 11 | 27 | 13 |
 | **Oír** (última grabación / audio nuevo) | 22 | 15 | 23 | 16 |
 
-- LED de **grabar**: se enciende mientras está pulsado (está grabando).
+- LED de **grabar**: se enciende al detectar la pulsación y permanece encendido mientras está pulsado. En Raspberry Pi, la consola registra cuántos milisegundos tarda en iniciarse la grabación desde la pulsación.
 - LED de **oír**: se enciende mientras está pulsado, y además queda encendido solo cuando llega una nota de voz al grupo, junto con el chime (`chimes.mp3`), hasta que se reproduce. O sea: al soltar, vuelve a encendido si quedan audios nuevos y apagado si no. Para comprobar el cableado sin esperar a nadie, `npm start` enciende los dos LEDs 2 segundos al arrancar.
 - Si un LED **no enciende cuando debería**, mira el log antes de revisar cables: `journalctl -u family-voice-message-box -b | grep gpioset`. Cada encendido y cada apagado deja una línea `gpioset gpiochip0 23=1 (pid N)`, así que ahí se ve si el software llegó a pedirlo. La línea solo está energizada mientras vive ese proceso, y cualquier final inesperado suyo —permisos, chip equivocado, o que algo externo lo mate— también queda registrado. Si el log muestra el `=1` y el LED sigue apagado, el problema es eléctrico: párala (`sudo systemctl stop family-voice-message-box`) y sostén la línea a mano con `gpioset --chip gpiochip0 23=1`, que se queda bloqueado hasta que le des Ctrl+C.
 - GND: los ocho pines de masa (6, 9, 14, 20, 25, 30, 34, 39) son equivalentes, así que cada cable puede ir al que quede más cómodo. El diagrama usa uno distinto para cada masa — grabar en **6** y **9**, oír en **14** y **20** — para no meter dos cables en el mismo agujero. Quedan libres 25, 30, 34 y 39.
@@ -186,6 +187,8 @@ Crea un bot y ten listo el **grupo de Telegram de la familia** (puedes crear uno
    - En BotFather: `/mybots` → elige tu bot → **Bot Settings** → **Group Privacy** → **Turn off**.
    - También puedes usar `/setprivacy` → elige el bot → **Disable**.
 
+Con `npm start` o `npm run start:dev` en ejecución, el bot responde `pong` a `ping` (sin distinguir mayúsculas) tanto en un chat privado como en el grupo familiar. Para iniciar un chat privado, primero abre el bot y envíale `/start`.
+
 **Crear el grupo familiar** (si aún no tienes uno)
 
 1. En Telegram, toca el ícono de lápiz / menú y elige **Nuevo grupo** (o *New Group*).
@@ -230,7 +233,10 @@ Ejemplo:
 ```env
 TELEGRAM_TOKEN=123456:ABC-DEF...
 CHAT_ID=-1001234567890
+# ADMIN_USER_IDS=123456789
 ```
+
+En un chat privado con el bot, envía `/id` para ver tu ID numérico de Telegram. Ponlo en `ADMIN_USER_IDS` (varios IDs separados por coma) y reinicia la caja. Después puedes usar `/status`, `/health` y `/logs`; esos comandos solo responden a los IDs autorizados. `ping`, `/help` y `/id` no requieren autorización. `/logs` conserva avisos y errores solo en memoria desde el último arranque.
 
 ### Dependencias del proyecto
 
@@ -297,7 +303,7 @@ En la Pi conviene el [arranque automático](#arranque-automático-raspberry-pi) 
 
 #### Desarrollo
 
-Espacio (mantener) para grabar y `p` para oír audios del grupo. Los LEDs de grabar/oír se reflejan en consola (`●`/`○`) con la misma lógica que en la Pi, así que `p` también enciende el de oír mientras lo mantienes, aunque no haya nada para reproducir:
+Espacio (mantener) para grabar y `p` para oír audios del grupo. Pulsa `f` para dejar de escuchar el teclado durante esta ejecución y usar otras aplicaciones sin que espacio inicie grabaciones; reinicia el comando para volver a habilitarlo. Los botones GPIO siguen funcionando en la Pi. Los LEDs de grabar/oír se reflejan en consola (`●`/`○`) con la misma lógica que en la Pi, así que `p` también enciende el de oír mientras lo mantienes, aunque no haya nada para reproducir:
 
 ```bash
 npm run start:dev

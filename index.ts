@@ -1,4 +1,5 @@
 import { stat, unlink } from 'node:fs/promises';
+import { performance } from 'node:perf_hooks';
 import {
   createAudioControl,
   detectPlatform,
@@ -27,6 +28,8 @@ import { listenToLinuxKeyboard } from './lib/linux-keyboard.ts';
 import { listenToTerminalKeys } from './lib/terminal-keys.ts';
 import { listenToFamilyGroupVoices } from './lib/listen-family-group-voices.ts';
 import { ensureTempDir, tempPath } from './lib/temp-dir.ts';
+import { getBoxHealth } from './lib/box-health.ts';
+import { getRecentDiagnosticLogs } from './lib/diagnostic-log.ts';
 import {
   tgGetMe,
   tgRequireFamilyGroup,
@@ -45,11 +48,37 @@ const READY_MESSAGE = 'Family Voice Box lista para comunicarse!';
  */
 const MIN_RECORDING_MS = 2000;
 
+/** Used in `/status` to report process uptime in a compact form. */
+function formatUptime(totalSeconds: number): string {
+  const seconds = Math.floor(totalSeconds);
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  const parts = [
+    ...(days > 0 ? [`${String(days)} d`] : []),
+    ...(hours > 0 ? [`${String(hours)} h`] : []),
+    ...(minutes > 0 ? [`${String(minutes)} min`] : []),
+    `${String(remainder)} s`,
+  ];
+  return parts.join(' ');
+}
+
 const telegramToken = process.env.TELEGRAM_TOKEN?.trim();
 const chatId = process.env.CHAT_ID?.trim();
+const rawAdminIds = (process.env.ADMIN_USER_IDS ?? '')
+  .split(',')
+  .map((id) => id.trim())
+  .filter((id) => id !== '');
+const configuredAdminIds = rawAdminIds.filter((id) => /^\d+$/.test(id));
+const invalidAdminIdCount = rawAdminIds.length - configuredAdminIds.length;
+const adminUserIds = new Set(configuredAdminIds);
 
 if (!telegramToken) throw new Error('TELEGRAM_TOKEN is not set');
 if (!chatId) throw new Error('CHAT_ID is not set');
+if (invalidAdminIdCount > 0) console.warn(
+    `Se ignoraron ${String(invalidAdminIdCount)} entradas no numéricas de ADMIN_USER_IDS.`,
+  );
 
 const familyGroup = await tgRequireFamilyGroup(telegramToken, chatId);
 const bot = await tgGetMe(telegramToken);
@@ -94,6 +123,7 @@ if (platform === 'raspberry') {
 
 let currentRecordingPath: string | undefined;
 let recordingStartedAt: number | undefined;
+let recordButtonPressedAt: number | undefined;
 let isRecording = false;
 
 /** Local OGG paths from the family group, waiting to be played. */
@@ -139,14 +169,17 @@ async function fileExists(filePath: string): Promise<boolean> {
 
 const handlers = {
   onRecordHeld(pressed: boolean) {
+    if (pressed && platform === 'raspberry') recordButtonPressedAt = performance.now();
     recordLed.set(pressed);
   },
 
   async onPress() {
     if (isRecording) return;
 
+    const buttonPressedAt = recordButtonPressedAt;
+    recordButtonPressedAt = undefined;
     currentRecordingPath = tempPath(
-      `out-${String(Date.now())}.${platform === 'raspberry' ? 'ogg' : 'wav'}`,
+      `out-${String(Date.now())}.${audio.recordingExtension}`,
     );
     console.log('Grabando…');
     try {
@@ -154,6 +187,11 @@ const handlers = {
     } catch (error: unknown) {
       currentRecordingPath = undefined;
       throw error;
+    }
+    if (buttonPressedAt !== undefined) {
+      console.log(
+        `Grabación iniciada con ${audio.name} ${String(Math.round(performance.now() - buttonPressedAt))} ms después de pulsar el botón.`,
+      );
     }
     recordingStartedAt = Date.now();
     isRecording = true;
@@ -204,7 +242,7 @@ const handlers = {
     if (recordedPath === undefined) return;
     if (!recordedExists) {
       console.error(
-        'ffmpeg no escribió el audio. En la Pi: enchufa un micrófono USB (tiene que aparecer en `/proc/asound/pcm`). ' +
+        'El grabador no escribió el audio. En la Pi: enchufa un micrófono USB (tiene que aparecer en `/proc/asound/pcm`). ' +
           'Grupo audio: sudo usermod -aG audio $USER. Opcional: ALSA_DEVICE=plughw:1,0 en .env',
       );
       return;
@@ -310,9 +348,9 @@ if (platform === 'mac') stopButtons = await listenToMacSpacebar(handlers);
     const stopKeys = stopEvdev ?? listenToTerminalKeys(handlers);
     keyboardHint =
       stopEvdev !== undefined
-        ? 'Teclado USB (evdev): mantén espacio para grabar, p para oír. '
+        ? 'Teclado USB (evdev): mantén espacio para grabar, p para oír; f deja de escuchar el teclado hasta reiniciar. '
         : process.stdin.isTTY
-          ? 'Sin teclado evdev: espacio en esta terminal, p para oír. '
+          ? 'Sin teclado evdev: espacio en esta terminal, p para oír; f deja de escuchar el teclado hasta reiniciar. '
           : '';
     stopButtons = () => {
       stopGpio();
@@ -325,6 +363,24 @@ const telegram = listenToFamilyGroupVoices({
   token: telegramToken,
   chatId,
   botId: bot.id,
+  adminUserIds,
+  async getDiagnosticResponse(command) {
+    if (command === 'status') return [
+      'Family Voice Box está respondiendo ✅',
+      `Modo: ${mode}`,
+      `Plataforma: ${platform} — ${audio.name}`,
+      `Tiempo activo: ${formatUptime(process.uptime())}`,
+      `Grabando: ${isRecording ? 'sí' : 'no'}`,
+      `Audios pendientes de oír: ${String(pendingInboundOggs.length)}`,
+    ].join('\n');
+
+    if (command === 'health') return getBoxHealth(platform);
+
+    const recentLogs = getRecentDiagnosticLogs();
+    return recentLogs.length === 0
+      ? 'No hay avisos ni errores registrados desde que arrancó la caja.'
+      : `Últimos avisos/errores desde el arranque:\n${recentLogs.join('\n')}`;
+  },
   async onVoiceDownloaded(localOggPath) {
     pendingInboundOggs.push(localOggPath);
     setUnheardAudio(true);
@@ -355,6 +411,7 @@ if (platform === 'raspberry') {
 
 if (platform === 'mac') console.log(
     'Mantén pulsado espacio para grabar. Pulsa p para oír audios del grupo. ' +
+      'Pulsa f para dejar de escuchar el teclado hasta reiniciar y evitar grabaciones accidentales. ' +
       'LEDs en consola (●/○). Ctrl+C para salir.',
   );
  else console.log(

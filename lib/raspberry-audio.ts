@@ -146,6 +146,20 @@ async function pickPlaybackDevice(): Promise<string | undefined> {
  */
 const OPUS_RATE = 48000;
 
+/** Recording backend selected with `AUDIO_RECORDER` on Raspberry Pi. */
+type RaspberryRecorder = 'arecord' | 'ffmpeg';
+
+/** Used in `primeAlsaCapture` and `createRaspberryAudioControl`. */
+function getRaspberryRecorder(): RaspberryRecorder {
+  const configured = process.env.AUDIO_RECORDER?.trim().toLowerCase();
+  if (configured === undefined || configured === '' || configured === 'ffmpeg') {
+    return 'ffmpeg';
+  }
+  if (configured === 'arecord') return 'arecord';
+
+  throw new Error(`Invalid AUDIO_RECORDER: ${configured}. Use "ffmpeg" or "arecord".`);
+}
+
 /**
  * Used in `ffmpegRecordArgs` and `primeAlsaCapture`.
  * Skip ffmpeg's default 5 s probe: that is what ate the first words on ALSA.
@@ -263,26 +277,44 @@ export async function primeAlsaCapture(): Promise<void> {
   const device = await resolveCaptureDevice();
   const rate = await pickCaptureRate(device);
   try {
-    await runAudioCommand('ffmpeg', [
-      '-nostdin',
-      '-y',
-      '-loglevel',
-      'error',
-      ...ALSA_LOW_LATENCY_INPUT,
-      '-f',
-      'alsa',
-      '-ac',
-      '1',
-      '-ar',
-      String(rate),
-      '-i',
-      device,
-      '-t',
-      '0.05',
-      '-f',
-      'null',
-      '-',
-    ]);
+    if (getRaspberryRecorder() === 'arecord') {
+      await runAudioCommand('arecord', [
+        '-D',
+        device,
+        '-t',
+        'raw',
+        '-f',
+        'S16_LE',
+        '-c',
+        '1',
+        '-r',
+        String(rate),
+        '-d',
+        '1',
+        '/dev/null',
+      ]);
+    } else {
+      await runAudioCommand('ffmpeg', [
+        '-nostdin',
+        '-y',
+        '-loglevel',
+        'error',
+        ...ALSA_LOW_LATENCY_INPUT,
+        '-f',
+        'alsa',
+        '-ac',
+        '1',
+        '-ar',
+        String(rate),
+        '-i',
+        device,
+        '-t',
+        '0.05',
+        '-f',
+        'null',
+        '-',
+      ]);
+    }
   } catch (error: unknown) {
     console.warn(
       'No se pudo preparar el micrófono al arrancar; la primera grabación puede tardar un poco más.',
@@ -439,6 +471,81 @@ export async function reportAlsaPlaybackDevice(): Promise<void> {
   if (volume === undefined) return;
 
   console.log(volumeLine('Volumen de salida', volume, hw.card, 'F3 = Playback'));
+}
+
+/**
+ * Used in `startArecordRecording`.
+ * arecord prints its WAVE header only after it has opened the ALSA capture device.
+ */
+function waitUntilArecordStarted(
+  child: ChildProcess,
+  getStderr: () => string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onData = (): void => {
+      if (!/^Recording WAVE /m.test(getStderr())) return;
+      cleanup();
+      resolve();
+    };
+
+    const onSpawnError = (error: Error): void => {
+      cleanup();
+      reject(new Error('Could not start arecord. Is alsa-utils installed?', { cause: error }));
+    };
+
+    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+      cleanup();
+      const details = getStderr().trim();
+      reject(
+        new Error(
+          details.length > 0
+            ? `arecord failed to start recording: ${details}`
+            : `arecord failed to start recording (code=${String(code)}, signal=${String(signal)})`,
+        ),
+      );
+    };
+
+    const cleanup = (): void => {
+      child.stderr?.off('data', onData);
+      child.off('exit', onExit);
+      child.off('error', onSpawnError);
+    };
+
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', onData);
+    child.once('exit', onExit);
+    child.once('error', onSpawnError);
+  });
+}
+
+/** Used in `createRaspberryAudioControl` when `AUDIO_RECORDER=arecord`. */
+async function startArecordRecording(
+  outputPath: string,
+  device: string,
+  rate: number,
+): Promise<{ child: ChildProcess; stderr: () => string }> {
+  let recordingStderr = '';
+  const child = startAudioProcess('arecord', [
+    '-D',
+    device,
+    '-t',
+    'wav',
+    '-f',
+    'S16_LE',
+    '-c',
+    '1',
+    '-r',
+    String(rate),
+    outputPath,
+  ]);
+
+  child.stderr?.setEncoding('utf8');
+  child.stderr?.on('data', (chunk: string) => {
+    recordingStderr += chunk;
+  });
+
+  await waitUntilArecordStarted(child, () => recordingStderr);
+  return { child, stderr: () => recordingStderr };
 }
 
 /**
@@ -636,26 +743,30 @@ async function playAlsa(
  * Used in `create-audio-control.ts` for `npm start` on the Raspberry Pi.
  */
 export function createRaspberryAudioControl(): AudioControl {
+  const recorder = getRaspberryRecorder();
   let recording: ChildProcess | undefined;
   let recordEncoderArgs: string[] | undefined;
   let loggedPlayback = false;
 
   return {
-    name: 'raspberry (ffmpeg / alsa)',
+    name: `raspberry (${recorder} / alsa)`,
+    recordingExtension: recorder === 'arecord' ? 'wav' : 'ogg',
 
     async startRecording(outputPath: string): Promise<void> {
       if (recording) throw new Error('Recording already in progress');
 
       const device = await resolveCaptureDevice();
       const rate = rateByDevice.get(device) ?? (await pickCaptureRate(device));
-      const started = await startFfmpegRecording(
-        outputPath,
-        device,
-        rate,
-        recordEncoderArgs ?? libopusEncoderArgs(),
-      );
+      const started = recorder === 'arecord'
+        ? await startArecordRecording(outputPath, device, rate)
+        : await startFfmpegRecording(
+            outputPath,
+            device,
+            rate,
+            recordEncoderArgs ?? libopusEncoderArgs(),
+          );
 
-      recordEncoderArgs = started.encoderArgs;
+      if ('encoderArgs' in started) recordEncoderArgs = started.encoderArgs;
       const child = started.child;
       recording = child;
 
@@ -666,15 +777,20 @@ export function createRaspberryAudioControl(): AudioControl {
           const details = started.stderr().trim();
           console.error(
             details.length > 0
-              ? `ffmpeg exited early: ${details}`
-              : `ffmpeg exited early (code=${String(code)})`,
+              ? `${recorder} exited early: ${details}`
+              : `${recorder} exited early (code=${String(code)})`,
           );
         }
       });
 
       child.once('error', (error) => {
         if (recording === child) recording = undefined;
-        console.error('ffmpeg failed to start. Is ffmpeg installed?', error);
+        console.error(
+          recorder === 'arecord'
+            ? 'arecord failed. Is alsa-utils installed?'
+            : 'ffmpeg failed to start. Is ffmpeg installed?',
+          error,
+        );
       });
     },
 

@@ -5,6 +5,7 @@
  * (and makes `journalctl -p err` able to list only these).
  */
 import { formatWithOptions } from 'node:util';
+import { rememberDiagnostic } from './diagnostic-log.ts';
 
 const RED = '\u001B[31m';
 const YELLOW = '\u001B[33m';
@@ -48,10 +49,14 @@ export function installColoredConsole(): void {
   const writeWarning = console.warn.bind(console);
 
   console.error = (...args: unknown[]): void => {
-    writeError(asError(formatWithOptions({ colors: false }, ...args)));
+    const message = formatWithOptions({ colors: false }, ...args);
+    rememberDiagnostic('ERROR', message);
+    writeError(asError(message));
   };
 
   console.warn = (...args: unknown[]): void => {
-    writeWarning(asWarning(formatWithOptions({ colors: false }, ...args)));
+    const message = formatWithOptions({ colors: false }, ...args);
+    rememberDiagnostic('WARN', message);
+    writeWarning(asWarning(message));
   };
 }

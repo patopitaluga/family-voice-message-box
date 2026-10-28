@@ -19,6 +19,8 @@ const require = createRequire(import.meta.url);
 const KEY_SPACE = 57;
 /** Linux `KEY_P`. */
 const KEY_P = 25;
+/** Linux `KEY_F`. */
+const KEY_F = 33;
 
 type EvdevKeyEvent = {
   code: number;
@@ -103,6 +105,7 @@ export async function listenToLinuxKeyboard(
   let pressInFlight = false;
   let releaseWhilePressInFlight = false;
   let playInFlight = false;
+  let stopped = false;
 
   const finishRelease = (): void => {
     held = false;
@@ -111,7 +114,31 @@ export async function listenToLinuxKeyboard(
     });
   };
 
+  const stop: StopListening = () => {
+    if (stopped) return;
+    stopped = true;
+    handlers.onPlayHeld?.(false);
+    if (held) {
+      handlers.onRecordHeld?.(false);
+      if (pressInFlight) releaseWhilePressInFlight = true;
+      else finishRelease();
+    }
+    for (const keyboard of keyboards) try {
+      keyboard.input?.destroy();
+    } catch {
+      // Device already gone.
+    }
+  };
+
   const onKeypress = (ev: EvdevKeyEvent): void => {
+    if (stopped) return;
+
+    if (ev.code === KEY_F) {
+      console.log('Teclado desactivado hasta reiniciar; espacio ya no inicia grabaciones.');
+      stop();
+      return;
+    }
+
     if (ev.code === KEY_P) {
       // Before the guards: the LED mirrors the key, even if there is nothing to play.
       handlers.onPlayHeld?.(true);
@@ -149,6 +176,8 @@ export async function listenToLinuxKeyboard(
   };
 
   const onKeyup = (ev: EvdevKeyEvent): void => {
+    if (stopped) return;
+
     if (ev.code === KEY_P) {
       handlers.onPlayHeld?.(false);
       return;
@@ -176,11 +205,5 @@ export async function listenToLinuxKeyboard(
 
   console.log(`Teclado evdev: ${devices.join(', ')}`);
 
-  return () => {
-    for (const keyboard of keyboards) try {
-      keyboard.input?.destroy();
-    } catch {
-      // Device already gone.
-    }
-  };
+  return stop;
 }

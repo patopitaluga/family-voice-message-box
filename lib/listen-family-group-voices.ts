@@ -5,6 +5,7 @@
 import {
   tgDownloadFile,
   tgGetFilePath,
+  tgSendMessage,
 } from '../send-audio-tg.ts';
 import { ensureTempDir, tempPath } from './temp-dir.ts';
 
@@ -12,8 +13,13 @@ export type FamilyVoiceListenerOptions = {
   token: string;
   chatId: string;
   botId: number;
+  adminUserIds: ReadonlySet<string>;
   /** Called with a local OGG path after each new family voice is downloaded. */
   onVoiceDownloaded: (localOggPath: string) => void | Promise<void>;
+  /** Builds an admin-only diagnostic response for a private Telegram command. */
+  getDiagnosticResponse: (
+    command: 'status' | 'health' | 'logs',
+  ) => string | Promise<string>;
 };
 
 /** Used in `index.ts`. */
@@ -31,15 +37,17 @@ export type FamilyVoiceListener = {
 type TgUpdate = {
   update_id: number;
   message?: {
-    chat?: { id: number };
+    chat?: { id: number; type?: string };
     from?: { id: number; is_bot?: boolean };
+    text?: string;
     voice?: { file_id: string; file_unique_id: string };
   };
 };
 
 /**
  * Used in `index.ts`.
- * Skips backlog on start; ignores the bot's own outbound voices.
+ * Skips backlog on start; handles private diagnostic commands, replies `pong`
+ * to pings in private or the family group, and ignores the bot's own messages.
  */
 export function listenToFamilyGroupVoices(
   options: FamilyVoiceListenerOptions,
@@ -148,12 +156,82 @@ async function handleUpdate(
   update: TgUpdate,
 ): Promise<void> {
   const message = update.message;
-  if (message?.voice === undefined) return;
-  if (message.chat === undefined) return;
-  if (String(message.chat.id) !== String(options.chatId)) return;
+  if (message?.chat === undefined) return;
 
   const from = message.from;
   if (from !== undefined && (from.id === options.botId || from.is_bot === true)) return;
+
+  const isFamilyGroup = String(message.chat.id) === String(options.chatId);
+  const isPrivate = message.chat.type === 'private';
+  const commandMatch = message.text?.trim().match(/^\/?([a-z]+)(?:@[a-z0-9_]+)?$/i);
+  const command = commandMatch?.[1]?.toLowerCase();
+
+  if (command === 'ping' && (isPrivate || isFamilyGroup)) {
+    await tgSendMessage(options.token, message.chat.id, 'pong');
+    console.log('Respondido pong a un ping de Telegram.');
+    return;
+  }
+
+  if (isPrivate && command === 'help') {
+    await tgSendMessage(
+      options.token,
+      message.chat.id,
+      [
+        'Comandos disponibles:',
+        'ping — responde pong',
+        '/id — muestra tu Telegram user ID',
+        '/status — estado del proceso (solo administradores)',
+        '/health — comprobaciones locales (solo administradores)',
+        '/logs — últimos avisos y errores desde el arranque (solo administradores)',
+      ].join('\n'),
+    );
+    return;
+  }
+
+  if (isPrivate && command === 'id') {
+    await tgSendMessage(
+      options.token,
+      message.chat.id,
+      from === undefined
+        ? 'No se pudo determinar tu Telegram user ID.'
+        : `Tu Telegram user ID es ${String(from.id)}.`,
+    );
+    return;
+  }
+
+  if (
+    isPrivate &&
+    (command === 'status' || command === 'health' || command === 'logs')
+  ) {
+    if (options.adminUserIds.size === 0) {
+      await tgSendMessage(
+        options.token,
+        message.chat.id,
+        'Los comandos de diagnóstico están desactivados. Configura ADMIN_USER_IDS en .env y reinicia la caja.',
+      );
+      return;
+    }
+
+    if (from === undefined || !options.adminUserIds.has(String(from.id))) {
+      console.warn(
+        `Comando de diagnóstico rechazado para Telegram user ID ${String(from?.id ?? 'desconocido')}.`,
+      );
+      await tgSendMessage(
+        options.token,
+        message.chat.id,
+        'No estás autorizado para consultar el estado de la caja.',
+      );
+      return;
+    }
+
+    const response = await options.getDiagnosticResponse(command);
+    await tgSendMessage(options.token, message.chat.id, response);
+    return;
+  }
+
+  if (isPrivate) return;
+  if (message.voice === undefined) return;
+  if (!isFamilyGroup) return;
 
   const filePath = await tgGetFilePath(options.token, message.voice.file_id);
   const localOggPath = tempPath(

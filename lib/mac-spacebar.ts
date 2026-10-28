@@ -42,8 +42,22 @@ export async function listenToMacSpacebar(
   let pressInFlight = false;
   let releaseWhilePressInFlight = false;
   let playInFlight = false;
+  let stopped = false;
+
+  const finishRelease = (): void => {
+    held = false;
+    void Promise.resolve(handlers.onRelease()).catch((error: unknown) => {
+      console.error(error);
+    });
+  };
 
   const listener = (event: { name?: string; state: 'DOWN' | 'UP' }): void => {
+    if (event.name === 'F' && event.state === 'DOWN') {
+      console.log('Teclado desactivado hasta reiniciar; espacio ya no inicia grabaciones.');
+      stop();
+      return;
+    }
+
     if (event.name === 'P' && event.state === 'UP') {
       handlers.onPlayHeld?.(false);
       return;
@@ -82,12 +96,7 @@ export async function listenToMacSpacebar(
           pressInFlight = false;
           if (releaseWhilePressInFlight) {
             releaseWhilePressInFlight = false;
-            held = false;
-            void Promise.resolve(handlers.onRelease()).catch(
-              (error: unknown) => {
-                console.error(error);
-              },
-            );
+            finishRelease();
           }
         });
       return;
@@ -102,10 +111,32 @@ export async function listenToMacSpacebar(
         return;
       }
 
-      held = false;
-      void Promise.resolve(handlers.onRelease()).catch((error: unknown) => {
-        console.error(error);
-      });
+      finishRelease();
+    }
+  };
+
+  const onStdinData = (chunk: Buffer): void => {
+    if (chunk[0] === 3) {
+      stop();
+      process.exit(0);
+    }
+  };
+
+  const stop: StopListening = () => {
+    if (stopped) return;
+    stopped = true;
+    handlers.onPlayHeld?.(false);
+    if (held) {
+      handlers.onRecordHeld?.(false);
+      if (pressInFlight) releaseWhilePressInFlight = true;
+      else finishRelease();
+    }
+    keyboard.removeListener(listener);
+    keyboard.kill();
+
+    if (process.stdin.isTTY) {
+      process.stdin.off('data', onStdinData);
+      process.stdin.setRawMode(false);
     }
   };
 
@@ -119,25 +150,12 @@ export async function listenToMacSpacebar(
     );
   }
 
-  // Swallow typed characters in this terminal; keep Ctrl+C working.
+  // Keep Ctrl+C working while the global keyboard listener is active.
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(true);
     process.stdin.resume();
-    process.stdin.on('data', (chunk: Buffer) => {
-      if (chunk[0] === 3) {
-        stop();
-        process.exit(0);
-      }
-    });
+    process.stdin.on('data', onStdinData);
   }
-
-  const stop: StopListening = () => {
-    keyboard.removeListener(listener);
-    keyboard.kill();
-
-    if (process.stdin.isTTY) process.stdin.setRawMode(false);
-
-  };
 
   return stop;
 }

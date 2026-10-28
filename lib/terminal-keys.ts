@@ -50,6 +50,7 @@ export function listenToTerminalKeys(
   let playInFlight = false;
   let playHeld = false;
   let playReleaseTimer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
 
   /** `p` has no key-up either, so its LED uses the same repeat trick as space. */
   const armPlayRelease = (ms: number): void => {
@@ -75,6 +76,28 @@ export function listenToTerminalKeys(
     });
   };
 
+  function stop(): void {
+    if (stopped) return;
+    stopped = true;
+    process.stdin.off('data', onData);
+    clearReleaseTimer();
+    if (playReleaseTimer !== undefined) {
+      clearTimeout(playReleaseTimer);
+      playReleaseTimer = undefined;
+    }
+    if (playHeld) {
+      playHeld = false;
+      handlers.onPlayHeld?.(false);
+    }
+    if (process.stdin.isTTY) process.stdin.setRawMode(false);
+
+    if (held) {
+      handlers.onRecordHeld?.(false);
+      if (pressInFlight) releaseWhilePressInFlight = true;
+      else finishRelease();
+    }
+  }
+
   const armRelease = (ms: number): void => {
     clearReleaseTimer();
     releaseTimer = setTimeout(() => {
@@ -94,6 +117,12 @@ export function listenToTerminalKeys(
     for (const byte of chunk) {
       if (byte === CTRL_C) {
         process.kill(process.pid, 'SIGINT');
+        return;
+      }
+
+      if (byte === 70 || byte === 102) {
+        console.log('Teclado desactivado hasta reiniciar; espacio ya no inicia grabaciones.');
+        stop();
         return;
       }
 
@@ -150,10 +179,5 @@ export function listenToTerminalKeys(
 
   process.stdin.on('data', onData);
 
-  return () => {
-    process.stdin.off('data', onData);
-    clearReleaseTimer();
-    if (playReleaseTimer !== undefined) clearTimeout(playReleaseTimer);
-    if (process.stdin.isTTY) process.stdin.setRawMode(false);
-  };
+  return stop;
 }

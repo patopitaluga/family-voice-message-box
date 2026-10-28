@@ -25,6 +25,7 @@ export function createMacAudioControl(): AudioControl {
 
   return {
     name: 'mac (ffmpeg / afplay)',
+    recordingExtension: 'wav',
 
     async startRecording(outputPath: string): Promise<void> {
       if (recording) throw new Error('Recording already in progress');

@@ -21,6 +21,7 @@ export type PlayAudioOptions = {
  */
 export type AudioControl = {
   readonly name: string;
+  readonly recordingExtension: 'ogg' | 'wav';
   startRecording(outputPath: string): Promise<void>;
   stopRecording(): Promise<void>;
   play(filePath: string, options?: PlayAudioOptions): Promise<void>;
